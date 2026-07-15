@@ -15,12 +15,15 @@
 # Original work: Copyright (c) 2024 Intelligent Robotics Lab (URJC).
 
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import ComposableNodeContainer
 from launch_ros.actions import Node
 from launch_ros.descriptions import ComposableNode
 
 
 def generate_launch_description() -> LaunchDescription:
+    pointcloud_frame = LaunchConfiguration('pointcloud_frame')
 
     composable_nodes = []
 
@@ -32,6 +35,7 @@ def generate_launch_description() -> LaunchDescription:
         parameters=[{
             'input_odom_topic': '/utlidar/robot_odom',
             'output_planar_odom_topic': '/pochi/odom_planar',
+            'pointcloud_frame': pointcloud_frame,
             'odom_frame': 'odom',
             'base_footprint_frame': 'base_footprint',
             'base_link_frame': 'base_link',
@@ -60,13 +64,17 @@ def generate_launch_description() -> LaunchDescription:
         output='screen',
         remappings=[('/cloud_in', '/pointcloud')],
         parameters=[{
-            'target_frame': 'radar',
+            'target_frame': pointcloud_frame,
             'transform_tolerance': 0.01,
         }],
     )
 
-    ld = LaunchDescription()
-    ld.add_action(container)
-    ld.add_action(pointclod_to_laserscan_cmd)
-
-    return ld
+    return LaunchDescription([
+        DeclareLaunchArgument(
+            'pointcloud_frame',
+            default_value='radar',
+            description='Frame ID assigned to the republished Unitree L1 point cloud.',
+        ),
+        container,
+        pointclod_to_laserscan_cmd,
+    ])

@@ -66,6 +66,7 @@ private:
 
   std::string input_odom_topic_;
   std::string output_planar_odom_topic_;
+  std::string pointcloud_frame_;
   std::string odom_frame_;
   std::string base_footprint_frame_;
   std::string base_link_frame_;

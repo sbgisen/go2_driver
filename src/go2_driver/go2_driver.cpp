@@ -48,6 +48,7 @@ Go2Driver::Go2Driver(const rclcpp::NodeOptions & options)
   input_odom_topic_ = declare_parameter<std::string>("input_odom_topic", "/utlidar/robot_odom");
   output_planar_odom_topic_ = declare_parameter<std::string>("output_planar_odom_topic",
       "/pochi/odom_planar");
+  pointcloud_frame_ = declare_parameter<std::string>("pointcloud_frame", "radar");
 
   odom_frame_ = declare_parameter<std::string>("odom_frame", "odom");
   base_footprint_frame_ = declare_parameter<std::string>("base_footprint_frame", "base_footprint");
@@ -78,6 +79,7 @@ Go2Driver::Go2Driver(const rclcpp::NodeOptions & options)
   RCLCPP_INFO(get_logger(), "go2_driver state bridge started");
   RCLCPP_INFO(get_logger(), "input_odom_topic: %s", input_odom_topic_.c_str());
   RCLCPP_INFO(get_logger(), "output_planar_odom_topic: %s", output_planar_odom_topic_.c_str());
+  RCLCPP_INFO(get_logger(), "pointcloud_frame: %s", pointcloud_frame_.c_str());
   RCLCPP_INFO(get_logger(), "odom_frame: %s", odom_frame_.c_str());
   RCLCPP_INFO(get_logger(), "base_footprint_frame: %s", base_footprint_frame_.c_str());
   RCLCPP_INFO(get_logger(), "base_link_frame: %s", base_link_frame_.c_str());
@@ -87,7 +89,7 @@ Go2Driver::Go2Driver(const rclcpp::NodeOptions & options)
 void Go2Driver::publishLidar(sensor_msgs::msg::PointCloud2::SharedPtr msg)
 {
   msg->header.stamp = now();
-  msg->header.frame_id = "radar";
+  msg->header.frame_id = pointcloud_frame_;
   pointcloud_pub_->publish(*msg);
 }
 

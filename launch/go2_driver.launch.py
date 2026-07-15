@@ -1,4 +1,4 @@
-# Copyright (c) 2024 Intelligent Robotics Lab (URJC)
+# Copyright (c) 2026 SoftBank Corp.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,12 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Original work: Copyright (c) 2024 Intelligent Robotics Lab (URJC).
+
 from launch import LaunchDescription
-from launch_ros.actions import ComposableNodeContainer, Node
+from launch_ros.actions import ComposableNodeContainer
+from launch_ros.actions import Node
 from launch_ros.descriptions import ComposableNode
 
 
-def generate_launch_description():
+def generate_launch_description() -> LaunchDescription:
 
     composable_nodes = []
 
@@ -26,7 +29,17 @@ def generate_launch_description():
         plugin='go2_driver::Go2Driver',
         name='go2_driver',
         namespace='',
-
+        parameters=[{
+            'input_odom_topic': '/utlidar/robot_odom',
+            'output_planar_odom_topic': '/pochi/odom_planar',
+            'odom_frame': 'odom',
+            'base_footprint_frame': 'base_footprint',
+            'base_link_frame': 'base_link',
+            'body_z_offset': 0.0,
+            'use_msg_stamp': False,
+            'publish_tf': True,
+            'publish_planar_odom': True,
+        }],
     )
     composable_nodes.append(composable_node)
 
@@ -47,9 +60,9 @@ def generate_launch_description():
         output='screen',
         remappings=[('/cloud_in', '/pointcloud')],
         parameters=[{
-                'target_frame': 'radar',
-                'transform_tolerance': 0.01,
-            }],
+            'target_frame': 'radar',
+            'transform_tolerance': 0.01,
+        }],
     )
 
     ld = LaunchDescription()

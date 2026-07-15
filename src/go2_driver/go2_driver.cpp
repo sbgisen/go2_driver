@@ -31,30 +31,57 @@
 #include <functional>
 #include <go2_driver/go2_driver.hpp>
 
+#include <string>
+
+#include "builtin_interfaces/msg/time.hpp"
+#include "geometry_msgs/msg/transform_stamped.hpp"
+#include "tf2/LinearMath/Matrix3x3.hpp"
+#include "tf2/LinearMath/Quaternion.hpp"
+#include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
+
 namespace go2_driver
 {
 
 Go2Driver::Go2Driver(const rclcpp::NodeOptions & options)
 : Node("go2_driver", options), tf_broadcaster_(this)
 {
-  rclcpp::QoS qos_profile(rclcpp::QoSInitialization::from_rmw(rmw_qos_profile_default));
-  qos_profile.durability(RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL);
+  input_odom_topic_ = declare_parameter<std::string>("input_odom_topic", "/utlidar/robot_odom");
+  output_planar_odom_topic_ = declare_parameter<std::string>("output_planar_odom_topic",
+      "/pochi/odom_planar");
+
+  odom_frame_ = declare_parameter<std::string>("odom_frame", "odom");
+  base_footprint_frame_ = declare_parameter<std::string>("base_footprint_frame", "base_footprint");
+  base_link_frame_ = declare_parameter<std::string>("base_link_frame", "base_link");
+
+  body_z_offset_ = declare_parameter<double>("body_z_offset", 0.0);
+  use_msg_stamp_ = declare_parameter<bool>("use_msg_stamp", true);
+  publish_tf_ = declare_parameter<bool>("publish_tf", true);
+  publish_planar_odom_ = declare_parameter<bool>("publish_planar_odom", true);
 
   pointcloud_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>("pointcloud", 10);
   joint_state_pub_ = create_publisher<sensor_msgs::msg::JointState>("joint_states", 10);
-  odom_pub_ = create_publisher<nav_msgs::msg::Odometry>("odom", qos_profile);
+  planar_odom_pub_ = create_publisher<nav_msgs::msg::Odometry>(output_planar_odom_topic_,
+      rclcpp::QoS(20));
 
   pointcloud_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
     "/utlidar/cloud", 10,
     std::bind(&Go2Driver::publishLidar, this, std::placeholders::_1));  // NOLINT(modernize-avoid-bind)
 
-  robot_pose_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
-    "/utlidar/robot_pose", 10,
-    std::bind(&Go2Driver::publishPoseStamped, this, std::placeholders::_1));  // NOLINT(modernize-avoid-bind)
+  odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
+    input_odom_topic_, rclcpp::QoS(50).reliable(),
+    std::bind(&Go2Driver::odomCallback, this, std::placeholders::_1));  // NOLINT(modernize-avoid-bind)
 
   low_state_sub_ = create_subscription<unitree_go::msg::LowState>(
     "lowstate", 10,
     std::bind(&Go2Driver::publishJointStates, this, std::placeholders::_1));  // NOLINT(modernize-avoid-bind)
+
+  RCLCPP_INFO(get_logger(), "go2_driver state bridge started");
+  RCLCPP_INFO(get_logger(), "input_odom_topic: %s", input_odom_topic_.c_str());
+  RCLCPP_INFO(get_logger(), "output_planar_odom_topic: %s", output_planar_odom_topic_.c_str());
+  RCLCPP_INFO(get_logger(), "odom_frame: %s", odom_frame_.c_str());
+  RCLCPP_INFO(get_logger(), "base_footprint_frame: %s", base_footprint_frame_.c_str());
+  RCLCPP_INFO(get_logger(), "base_link_frame: %s", base_link_frame_.c_str());
+  RCLCPP_INFO(get_logger(), "body_z_offset: %.3f", body_z_offset_);
 }
 
 void Go2Driver::publishLidar(sensor_msgs::msg::PointCloud2::SharedPtr msg)
@@ -64,35 +91,78 @@ void Go2Driver::publishLidar(sensor_msgs::msg::PointCloud2::SharedPtr msg)
   pointcloud_pub_->publish(*msg);
 }
 
-void Go2Driver::publishPoseStamped(geometry_msgs::msg::PoseStamped::SharedPtr msg)
+void Go2Driver::odomCallback(nav_msgs::msg::Odometry::SharedPtr msg)
 {
-  geometry_msgs::msg::TransformStamped transform;
-  transform.header.stamp = now();
-  transform.header.frame_id = "odom";
-  transform.child_frame_id = "base_link";
-  transform.transform.translation.x = msg->pose.position.x;
-  transform.transform.translation.y = msg->pose.position.y;
-  transform.transform.translation.z = msg->pose.position.z + 0.07;
-  transform.transform.rotation.x = msg->pose.orientation.x;
-  transform.transform.rotation.y = msg->pose.orientation.y;
-  transform.transform.rotation.z = msg->pose.orientation.z;
-  transform.transform.rotation.w = msg->pose.orientation.w;
-  tf_broadcaster_.sendTransform(transform);
+  builtin_interfaces::msg::Time stamp;
+  if (use_msg_stamp_) {
+    stamp = msg->header.stamp;
+  } else {
+    stamp = get_clock()->now();
+  }
 
-  if (!odom_published_) {
-    nav_msgs::msg::Odometry odom;
-    odom.header.stamp = now();
-    odom.header.frame_id = "odom";
-    odom.child_frame_id = "base_link";
-    odom.pose.pose.position.x = msg->pose.position.x;
-    odom.pose.pose.position.y = msg->pose.position.y;
-    odom.pose.pose.position.z = msg->pose.position.z + 0.07;
-    odom.pose.pose.orientation.x = msg->pose.orientation.x;
-    odom.pose.pose.orientation.y = msg->pose.orientation.y;
-    odom.pose.pose.orientation.z = msg->pose.orientation.z;
-    odom.pose.pose.orientation.w = msg->pose.orientation.w;
-    odom_pub_->publish(odom);
-    odom_published_ = true;
+  const auto & p = msg->pose.pose.position;
+  const auto & q_msg = msg->pose.pose.orientation;
+
+  tf2::Quaternion q_in;
+  tf2::fromMsg(q_msg, q_in);
+
+  double roll;
+  double pitch;
+  double yaw;
+  tf2::Matrix3x3(q_in).getRPY(roll, pitch, yaw);
+
+  tf2::Quaternion q_yaw;
+  q_yaw.setRPY(0.0, 0.0, yaw);
+  q_yaw.normalize();
+
+  tf2::Quaternion q_rp;
+  q_rp.setRPY(roll, pitch, 0.0);
+  q_rp.normalize();
+
+  const double body_z = p.z + body_z_offset_;
+
+  if (publish_tf_) {
+    geometry_msgs::msg::TransformStamped tf_odom_to_footprint;
+    tf_odom_to_footprint.header.stamp = stamp;
+    tf_odom_to_footprint.header.frame_id = odom_frame_;
+    tf_odom_to_footprint.child_frame_id = base_footprint_frame_;
+    tf_odom_to_footprint.transform.translation.x = p.x;
+    tf_odom_to_footprint.transform.translation.y = p.y;
+    tf_odom_to_footprint.transform.translation.z = 0.0;
+    tf_odom_to_footprint.transform.rotation = tf2::toMsg(q_yaw);
+
+    geometry_msgs::msg::TransformStamped tf_footprint_to_link;
+    tf_footprint_to_link.header.stamp = stamp;
+    tf_footprint_to_link.header.frame_id = base_footprint_frame_;
+    tf_footprint_to_link.child_frame_id = base_link_frame_;
+    tf_footprint_to_link.transform.translation.x = 0.0;
+    tf_footprint_to_link.transform.translation.y = 0.0;
+    tf_footprint_to_link.transform.translation.z = body_z;
+    tf_footprint_to_link.transform.rotation = tf2::toMsg(q_rp);
+
+    tf_broadcaster_.sendTransform(tf_odom_to_footprint);
+    tf_broadcaster_.sendTransform(tf_footprint_to_link);
+  }
+
+  if (publish_planar_odom_) {
+    nav_msgs::msg::Odometry planar;
+    planar.header.stamp = stamp;
+    planar.header.frame_id = odom_frame_;
+    planar.child_frame_id = base_footprint_frame_;
+
+    planar.pose.pose.position.x = p.x;
+    planar.pose.pose.position.y = p.y;
+    planar.pose.pose.position.z = 0.0;
+    planar.pose.pose.orientation = tf2::toMsg(q_yaw);
+
+    planar.twist.twist.linear.x = msg->twist.twist.linear.x;
+    planar.twist.twist.linear.y = msg->twist.twist.linear.y;
+    planar.twist.twist.linear.z = 0.0;
+    planar.twist.twist.angular.x = 0.0;
+    planar.twist.twist.angular.y = 0.0;
+    planar.twist.twist.angular.z = msg->twist.twist.angular.z;
+
+    planar_odom_pub_->publish(planar);
   }
 }
 

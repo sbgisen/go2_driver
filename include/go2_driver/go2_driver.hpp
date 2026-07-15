@@ -31,12 +31,12 @@
 #ifndef GO2_DRIVER__GO2_DRIVER_HPP_
 #define GO2_DRIVER__GO2_DRIVER_HPP_
 
-#include <geometry_msgs/msg/pose_stamped.hpp>
-#include <geometry_msgs/msg/transform_stamped.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+
+#include <string>
 
 #include "tf2_ros/transform_broadcaster.hpp"
 #include "unitree_go/msg/low_state.hpp"
@@ -51,20 +51,29 @@ public:
 
 private:
   void publishLidar(sensor_msgs::msg::PointCloud2::SharedPtr msg);
-  void publishPoseStamped(geometry_msgs::msg::PoseStamped::SharedPtr msg);
+  void odomCallback(nav_msgs::msg::Odometry::SharedPtr msg);
   void publishJointStates(unitree_go::msg::LowState::SharedPtr msg);
 
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_sub_;
-  rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr robot_pose_sub_;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   rclcpp::Subscription<unitree_go::msg::LowState>::SharedPtr low_state_sub_;
 
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_pub_;
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_state_pub_;
-  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
+  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr planar_odom_pub_;
 
   tf2_ros::TransformBroadcaster tf_broadcaster_;
 
-  bool odom_published_{false};
+  std::string input_odom_topic_;
+  std::string output_planar_odom_topic_;
+  std::string odom_frame_;
+  std::string base_footprint_frame_;
+  std::string base_link_frame_;
+
+  double body_z_offset_;
+  bool use_msg_stamp_;
+  bool publish_tf_;
+  bool publish_planar_odom_;
 };
 
 }  // namespace go2_driver

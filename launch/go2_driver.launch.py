@@ -16,6 +16,7 @@
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import ComposableNodeContainer
 from launch_ros.actions import Node
@@ -24,6 +25,7 @@ from launch_ros.descriptions import ComposableNode
 
 def generate_launch_description() -> LaunchDescription:
     pointcloud_frame = LaunchConfiguration('pointcloud_frame')
+    use_pointcloud_to_laserscan = LaunchConfiguration('use_pointcloud_to_laserscan')
 
     composable_nodes = []
 
@@ -56,11 +58,12 @@ def generate_launch_description() -> LaunchDescription:
         output='screen',
     )
 
-    pointclod_to_laserscan_cmd = Node(
+    pointcloud_to_laserscan_cmd = Node(
         package='pointcloud_to_laserscan',
         executable='pointcloud_to_laserscan_node',
         name='pointcloud_to_laserscan',
         namespace='',
+        condition=IfCondition(use_pointcloud_to_laserscan),
         output='screen',
         remappings=[('/cloud_in', '/pointcloud')],
         parameters=[{
@@ -75,6 +78,11 @@ def generate_launch_description() -> LaunchDescription:
             default_value='radar',
             description='Frame ID assigned to the republished Unitree L1 point cloud.',
         ),
+        DeclareLaunchArgument(
+            'use_pointcloud_to_laserscan',
+            default_value='true',
+            description='Whether to start pointcloud_to_laserscan.',
+        ),
         container,
-        pointclod_to_laserscan_cmd,
+        pointcloud_to_laserscan_cmd,
     ])

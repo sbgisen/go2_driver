@@ -64,7 +64,7 @@ Go2Driver::Go2Driver(const rclcpp::NodeOptions & options) : Node("go2_driver", o
 {
   input_pointcloud_topic_ = declare_parameter<std::string>("input_pointcloud_topic", "/utlidar/cloud");
   input_odom_topic_ = declare_parameter<std::string>("input_odom_topic", "/utlidar/robot_odom");
-  output_planar_odom_topic_ = declare_parameter<std::string>("output_planar_odom_topic", "/pochi/odom_planar");
+  output_planar_odom_topic_ = declare_parameter<std::string>("output_planar_odom_topic", "odom_planar");
   pointcloud_frame_ = declare_parameter<std::string>("pointcloud_frame", "radar");
 
   odom_frame_ = declare_parameter<std::string>("odom_frame", "odom");

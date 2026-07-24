@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-// Original work: Copyright (c) 2024 Intelligent Robotics Lab (URJC).
+// Original work: Copyright (c) 2024 Intelligent Robotics Lab (URJC),
+// licensed under the BSD 3-Clause License. See the NOTICE file for its terms.
 
 #include <array>
 #include <cstddef>

@@ -27,6 +27,10 @@ namespace go2_driver
 namespace
 {
 
+// Inclusive bounds accepted by the Sport API SpeedLevel command.
+constexpr int32_t g_MIN_SPEED_LEVEL = -1;
+constexpr int32_t g_MAX_SPEED_LEVEL = 1;
+
 auto emptyJson() -> nlohmann::json { return nlohmann::json::object(); }
 
 template <typename T>
@@ -213,9 +217,10 @@ void Go2SportBridge::handleSpeedLevel(
 {
   (void)header;
 
-  if (request->level < -1 || request->level > 1) {
+  if (request->level < g_MIN_SPEED_LEVEL || request->level > g_MAX_SPEED_LEVEL) {
     response->success = false;
-    response->message = "level is out of range [-1, 1]";
+    response->message =
+      "level is out of range [" + std::to_string(g_MIN_SPEED_LEVEL) + ", " + std::to_string(g_MAX_SPEED_LEVEL) + "]";
     return;
   }
 

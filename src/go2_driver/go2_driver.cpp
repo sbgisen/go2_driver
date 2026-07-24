@@ -101,21 +101,24 @@ Go2Driver::Go2Driver(const rclcpp::NodeOptions & options) : Node("go2_driver", o
   RCLCPP_INFO(get_logger(), "body_z_offset: %.3f", body_z_offset_);
 }
 
+auto Go2Driver::resolveStamp(const builtin_interfaces::msg::Time & msg_stamp) const -> builtin_interfaces::msg::Time
+{
+  if (use_msg_stamp_) {
+    return msg_stamp;
+  }
+  return get_clock()->now();
+}
+
 void Go2Driver::publishLidar(sensor_msgs::msg::PointCloud2::SharedPtr msg)
 {
-  msg->header.stamp = now();
+  msg->header.stamp = resolveStamp(msg->header.stamp);
   msg->header.frame_id = pointcloud_frame_;
   pointcloud_pub_->publish(*msg);
 }
 
 void Go2Driver::odomCallback(nav_msgs::msg::Odometry::SharedPtr msg)
 {
-  builtin_interfaces::msg::Time stamp;
-  if (use_msg_stamp_) {
-    stamp = msg->header.stamp;
-  } else {
-    stamp = get_clock()->now();
-  }
+  const builtin_interfaces::msg::Time stamp = resolveStamp(msg->header.stamp);
 
   const auto & p = msg->pose.pose.position;
   const auto & q_msg = msg->pose.pose.orientation;
@@ -171,6 +174,8 @@ void Go2Driver::odomCallback(nav_msgs::msg::Odometry::SharedPtr msg)
 void Go2Driver::publishJointStates(unitree_go::msg::LowState::SharedPtr msg)
 {
   sensor_msgs::msg::JointState joint_state;
+  // LowState carries no ROS header stamp (only a device tick), so use_msg_stamp_
+  // cannot apply here; always stamp with the current node clock.
   joint_state.header.stamp = now();
   joint_state.name = g_JOINT_NAMES;
 

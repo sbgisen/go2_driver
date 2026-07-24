@@ -17,6 +17,7 @@
 #ifndef GO2_DRIVER__GO2_DRIVER_HPP_
 #define GO2_DRIVER__GO2_DRIVER_HPP_
 
+#include <builtin_interfaces/msg/time.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
@@ -38,6 +39,9 @@ private:
   void publishLidar(sensor_msgs::msg::PointCloud2::SharedPtr msg);
   void odomCallback(nav_msgs::msg::Odometry::SharedPtr msg);
   void publishJointStates(unitree_go::msg::LowState::SharedPtr msg);
+
+  // Returns msg_stamp when use_msg_stamp_ is set, otherwise the current node clock.
+  auto resolveStamp(const builtin_interfaces::msg::Time & msg_stamp) const -> builtin_interfaces::msg::Time;
 
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;

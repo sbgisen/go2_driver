@@ -30,7 +30,6 @@
 
 #include <functional>
 #include <go2_driver/go2_driver.hpp>
-
 #include <string>
 
 #include "builtin_interfaces/msg/time.hpp"
@@ -42,12 +41,10 @@
 namespace go2_driver
 {
 
-Go2Driver::Go2Driver(const rclcpp::NodeOptions & options)
-: Node("go2_driver", options), tf_broadcaster_(this)
+Go2Driver::Go2Driver(const rclcpp::NodeOptions & options) : Node("go2_driver", options), tf_broadcaster_(this)
 {
   input_odom_topic_ = declare_parameter<std::string>("input_odom_topic", "/utlidar/robot_odom");
-  output_planar_odom_topic_ = declare_parameter<std::string>("output_planar_odom_topic",
-      "/pochi/odom_planar");
+  output_planar_odom_topic_ = declare_parameter<std::string>("output_planar_odom_topic", "/pochi/odom_planar");
   pointcloud_frame_ = declare_parameter<std::string>("pointcloud_frame", "radar");
 
   odom_frame_ = declare_parameter<std::string>("odom_frame", "odom");
@@ -61,8 +58,7 @@ Go2Driver::Go2Driver(const rclcpp::NodeOptions & options)
 
   pointcloud_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>("pointcloud", 10);
   joint_state_pub_ = create_publisher<sensor_msgs::msg::JointState>("joint_states", 10);
-  planar_odom_pub_ = create_publisher<nav_msgs::msg::Odometry>(output_planar_odom_topic_,
-      rclcpp::QoS(20));
+  planar_odom_pub_ = create_publisher<nav_msgs::msg::Odometry>(output_planar_odom_topic_, rclcpp::QoS(20));
 
   pointcloud_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
     "/utlidar/cloud", 10,
@@ -172,14 +168,13 @@ void Go2Driver::publishJointStates(unitree_go::msg::LowState::SharedPtr msg)
 {
   sensor_msgs::msg::JointState joint_state;
   joint_state.header.stamp = now();
-  joint_state.name = {"FL_hip_joint", "FL_thigh_joint", "FL_calf_joint", "FR_hip_joint",
-    "FR_thigh_joint", "FR_calf_joint", "RL_hip_joint", "RL_thigh_joint",
-    "RL_calf_joint", "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint"};
+  joint_state.name = {"FL_hip_joint",   "FL_thigh_joint", "FL_calf_joint",  "FR_hip_joint",
+                      "FR_thigh_joint", "FR_calf_joint",  "RL_hip_joint",   "RL_thigh_joint",
+                      "RL_calf_joint",  "RR_hip_joint",   "RR_thigh_joint", "RR_calf_joint"};
 
-  joint_state.position = {msg->motor_state[3].q, msg->motor_state[4].q, msg->motor_state[5].q,
-    msg->motor_state[0].q,
-    msg->motor_state[1].q, msg->motor_state[2].q, msg->motor_state[9].q, msg->motor_state[10].q,
-    msg->motor_state[11].q, msg->motor_state[6].q, msg->motor_state[7].q, msg->motor_state[8].q};
+  joint_state.position = {msg->motor_state[3].q,  msg->motor_state[4].q, msg->motor_state[5].q, msg->motor_state[0].q,
+                          msg->motor_state[1].q,  msg->motor_state[2].q, msg->motor_state[9].q, msg->motor_state[10].q,
+                          msg->motor_state[11].q, msg->motor_state[6].q, msg->motor_state[7].q, msg->motor_state[8].q};
 
   joint_state_pub_->publish(joint_state);
 }

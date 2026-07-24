@@ -43,6 +43,21 @@ const std::vector<std::string> g_JOINT_NAMES = {"FL_hip_joint",   "FL_thigh_join
 // each entry of g_JOINT_NAMES (URDF order) to the matching motor_state index.
 constexpr std::array<std::size_t, 12> g_MOTOR_STATE_INDEX = {3, 4, 5, 0, 1, 2, 9, 10, 11, 6, 7, 8};
 
+auto makeTransform(
+  const builtin_interfaces::msg::Time & stamp, const std::string & parent_frame, const std::string & child_frame,
+  double x, double y, double z, const tf2::Quaternion & rotation) -> geometry_msgs::msg::TransformStamped
+{
+  geometry_msgs::msg::TransformStamped tf;
+  tf.header.stamp = stamp;
+  tf.header.frame_id = parent_frame;
+  tf.child_frame_id = child_frame;
+  tf.transform.translation.x = x;
+  tf.transform.translation.y = y;
+  tf.transform.translation.z = z;
+  tf.transform.rotation = tf2::toMsg(rotation);
+  return tf;
+}
+
 }  // namespace
 
 Go2Driver::Go2Driver(const rclcpp::NodeOptions & options) : Node("go2_driver", options), tf_broadcaster_(this)
@@ -124,26 +139,9 @@ void Go2Driver::odomCallback(nav_msgs::msg::Odometry::SharedPtr msg)
   const double body_z = p.z + body_z_offset_;
 
   if (publish_tf_) {
-    geometry_msgs::msg::TransformStamped tf_odom_to_footprint;
-    tf_odom_to_footprint.header.stamp = stamp;
-    tf_odom_to_footprint.header.frame_id = odom_frame_;
-    tf_odom_to_footprint.child_frame_id = base_footprint_frame_;
-    tf_odom_to_footprint.transform.translation.x = p.x;
-    tf_odom_to_footprint.transform.translation.y = p.y;
-    tf_odom_to_footprint.transform.translation.z = 0.0;
-    tf_odom_to_footprint.transform.rotation = tf2::toMsg(q_yaw);
-
-    geometry_msgs::msg::TransformStamped tf_footprint_to_link;
-    tf_footprint_to_link.header.stamp = stamp;
-    tf_footprint_to_link.header.frame_id = base_footprint_frame_;
-    tf_footprint_to_link.child_frame_id = base_link_frame_;
-    tf_footprint_to_link.transform.translation.x = 0.0;
-    tf_footprint_to_link.transform.translation.y = 0.0;
-    tf_footprint_to_link.transform.translation.z = body_z;
-    tf_footprint_to_link.transform.rotation = tf2::toMsg(q_rp);
-
-    tf_broadcaster_.sendTransform(tf_odom_to_footprint);
-    tf_broadcaster_.sendTransform(tf_footprint_to_link);
+    tf_broadcaster_.sendTransform(makeTransform(stamp, odom_frame_, base_footprint_frame_, p.x, p.y, 0.0, q_yaw));
+    tf_broadcaster_.sendTransform(
+      makeTransform(stamp, base_footprint_frame_, base_link_frame_, 0.0, 0.0, body_z, q_rp));
   }
 
   if (publish_planar_odom_) {

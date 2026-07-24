@@ -39,7 +39,7 @@ def generate_launch_description() -> LaunchDescription:
         namespace='',
         parameters=[{
             'input_odom_topic': '/utlidar/robot_odom',
-            'output_planar_odom_topic': '/pochi/odom_planar',
+            'output_planar_odom_topic': '/odom_planar',
             'pointcloud_frame': pointcloud_frame,
             'odom_frame': 'odom',
             'base_footprint_frame': 'base_footprint',

@@ -52,7 +52,7 @@ Go2Driver::Go2Driver(const rclcpp::NodeOptions & options) : Node("go2_driver", o
   base_link_frame_ = declare_parameter<std::string>("base_link_frame", "base_link");
 
   body_z_offset_ = declare_parameter<double>("body_z_offset", 0.0);
-  use_msg_stamp_ = declare_parameter<bool>("use_msg_stamp", true);
+  use_msg_stamp_ = declare_parameter<bool>("use_msg_stamp", false);
   publish_tf_ = declare_parameter<bool>("publish_tf", true);
   publish_planar_odom_ = declare_parameter<bool>("publish_planar_odom", true);
 
@@ -65,7 +65,7 @@ Go2Driver::Go2Driver(const rclcpp::NodeOptions & options) : Node("go2_driver", o
     std::bind(&Go2Driver::publishLidar, this, std::placeholders::_1));  // NOLINT(modernize-avoid-bind)
 
   odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
-    input_odom_topic_, rclcpp::QoS(50).reliable(),
+    input_odom_topic_, rclcpp::QoS(50).best_effort(),
     std::bind(&Go2Driver::odomCallback, this, std::placeholders::_1));  // NOLINT(modernize-avoid-bind)
 
   low_state_sub_ = create_subscription<unitree_go::msg::LowState>(

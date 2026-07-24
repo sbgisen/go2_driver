@@ -38,6 +38,7 @@ def generate_launch_description() -> LaunchDescription:
         name='go2_driver',
         namespace='',
         parameters=[{
+            'input_pointcloud_topic': '/utlidar/cloud',
             'input_odom_topic': '/utlidar/robot_odom',
             'output_planar_odom_topic': '/odom_planar',
             'pointcloud_frame': pointcloud_frame,

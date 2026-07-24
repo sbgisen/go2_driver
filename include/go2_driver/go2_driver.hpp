@@ -53,6 +53,7 @@ private:
 
   tf2_ros::TransformBroadcaster tf_broadcaster_;
 
+  std::string input_pointcloud_topic_;
   std::string input_odom_topic_;
   std::string output_planar_odom_topic_;
   std::string pointcloud_frame_;

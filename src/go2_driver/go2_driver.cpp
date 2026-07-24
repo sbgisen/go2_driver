@@ -62,6 +62,7 @@ auto makeTransform(
 
 Go2Driver::Go2Driver(const rclcpp::NodeOptions & options) : Node("go2_driver", options), tf_broadcaster_(this)
 {
+  input_pointcloud_topic_ = declare_parameter<std::string>("input_pointcloud_topic", "/utlidar/cloud");
   input_odom_topic_ = declare_parameter<std::string>("input_odom_topic", "/utlidar/robot_odom");
   output_planar_odom_topic_ = declare_parameter<std::string>("output_planar_odom_topic", "/pochi/odom_planar");
   pointcloud_frame_ = declare_parameter<std::string>("pointcloud_frame", "radar");
@@ -80,7 +81,7 @@ Go2Driver::Go2Driver(const rclcpp::NodeOptions & options) : Node("go2_driver", o
   planar_odom_pub_ = create_publisher<nav_msgs::msg::Odometry>(output_planar_odom_topic_, rclcpp::QoS(20));
 
   pointcloud_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
-    "/utlidar/cloud", 10,
+    input_pointcloud_topic_, 10,
     std::bind(&Go2Driver::publishLidar, this, std::placeholders::_1));  // NOLINT(modernize-avoid-bind)
 
   odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
@@ -92,6 +93,7 @@ Go2Driver::Go2Driver(const rclcpp::NodeOptions & options) : Node("go2_driver", o
     std::bind(&Go2Driver::publishJointStates, this, std::placeholders::_1));  // NOLINT(modernize-avoid-bind)
 
   RCLCPP_INFO(get_logger(), "go2_driver state bridge started");
+  RCLCPP_INFO(get_logger(), "input_pointcloud_topic: %s", input_pointcloud_topic_.c_str());
   RCLCPP_INFO(get_logger(), "input_odom_topic: %s", input_odom_topic_.c_str());
   RCLCPP_INFO(get_logger(), "output_planar_odom_topic: %s", output_planar_odom_topic_.c_str());
   RCLCPP_INFO(get_logger(), "pointcloud_frame: %s", pointcloud_frame_.c_str());

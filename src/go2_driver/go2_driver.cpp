@@ -152,6 +152,7 @@ void Go2Driver::odomCallback(nav_msgs::msg::Odometry::SharedPtr msg)
     planar.pose.pose.position.y = p.y;
     planar.pose.pose.position.z = 0.0;
     planar.pose.pose.orientation = tf2::toMsg(q_yaw);
+    planar.pose.covariance = msg->pose.covariance;
 
     planar.twist.twist.linear.x = msg->twist.twist.linear.x;
     planar.twist.twist.linear.y = msg->twist.twist.linear.y;
@@ -159,6 +160,7 @@ void Go2Driver::odomCallback(nav_msgs::msg::Odometry::SharedPtr msg)
     planar.twist.twist.angular.x = 0.0;
     planar.twist.twist.angular.y = 0.0;
     planar.twist.twist.angular.z = msg->twist.twist.angular.z;
+    planar.twist.covariance = msg->twist.covariance;
 
     planar_odom_pub_->publish(planar);
   }

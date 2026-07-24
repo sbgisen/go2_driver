@@ -14,9 +14,12 @@
 //
 // Original work: Copyright (c) 2024 Intelligent Robotics Lab (URJC).
 
+#include <array>
+#include <cstddef>
 #include <functional>
 #include <go2_driver/go2_driver.hpp>
 #include <string>
+#include <vector>
 
 #include "builtin_interfaces/msg/time.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
@@ -26,6 +29,21 @@
 
 namespace go2_driver
 {
+
+namespace
+{
+
+// Joint names in the order expected by the GO2 URDF: legs FL, FR, RL, RR, each
+// with hip, thigh and calf joints.
+const std::vector<std::string> g_JOINT_NAMES = {"FL_hip_joint",   "FL_thigh_joint", "FL_calf_joint",  "FR_hip_joint",
+                                                "FR_thigh_joint", "FR_calf_joint",  "RL_hip_joint",   "RL_thigh_joint",
+                                                "RL_calf_joint",  "RR_hip_joint",   "RR_thigh_joint", "RR_calf_joint"};
+
+// Unitree orders its motor_state array as legs FR, FL, RR, RL. These indices map
+// each entry of g_JOINT_NAMES (URDF order) to the matching motor_state index.
+constexpr std::array<std::size_t, 12> g_MOTOR_STATE_INDEX = {3, 4, 5, 0, 1, 2, 9, 10, 11, 6, 7, 8};
+
+}  // namespace
 
 Go2Driver::Go2Driver(const rclcpp::NodeOptions & options) : Node("go2_driver", options), tf_broadcaster_(this)
 {
@@ -156,13 +174,12 @@ void Go2Driver::publishJointStates(unitree_go::msg::LowState::SharedPtr msg)
 {
   sensor_msgs::msg::JointState joint_state;
   joint_state.header.stamp = now();
-  joint_state.name = {"FL_hip_joint",   "FL_thigh_joint", "FL_calf_joint",  "FR_hip_joint",
-                      "FR_thigh_joint", "FR_calf_joint",  "RL_hip_joint",   "RL_thigh_joint",
-                      "RL_calf_joint",  "RR_hip_joint",   "RR_thigh_joint", "RR_calf_joint"};
+  joint_state.name = g_JOINT_NAMES;
 
-  joint_state.position = {msg->motor_state[3].q,  msg->motor_state[4].q, msg->motor_state[5].q, msg->motor_state[0].q,
-                          msg->motor_state[1].q,  msg->motor_state[2].q, msg->motor_state[9].q, msg->motor_state[10].q,
-                          msg->motor_state[11].q, msg->motor_state[6].q, msg->motor_state[7].q, msg->motor_state[8].q};
+  joint_state.position.reserve(g_MOTOR_STATE_INDEX.size());
+  for (const auto index : g_MOTOR_STATE_INDEX) {
+    joint_state.position.push_back(msg->motor_state[index].q);
+  }
 
   joint_state_pub_->publish(joint_state);
 }

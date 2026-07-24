@@ -45,7 +45,9 @@ public:
 private:
   auto initPresets() -> void;
 
-  auto publishRequest(int32_t api_id, const nlohmann::json & parameter, std::string & message) -> bool;
+  // Publishes a Sport API request and returns a human-readable description of it.
+  // Publishing is fire-and-forget, so there is no failure path to report.
+  auto publishRequest(int32_t api_id, const nlohmann::json & parameter) -> std::string;
 
   auto executeSequence(const std::vector<SportCommandStep> & steps, std::string & message) -> bool;
 

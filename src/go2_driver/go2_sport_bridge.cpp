@@ -152,7 +152,7 @@ void Go2SportBridge::initPresets()
   };
 }
 
-auto Go2SportBridge::publishRequest(int32_t api_id, const nlohmann::json & parameter, std::string & message) -> bool
+auto Go2SportBridge::publishRequest(int32_t api_id, const nlohmann::json & parameter) -> std::string
 {
   unitree_api::msg::Request req;
   req.header.identity.api_id = api_id;
@@ -160,9 +160,7 @@ auto Go2SportBridge::publishRequest(int32_t api_id, const nlohmann::json & param
 
   request_pub_->publish(req);
 
-  message = "published api_id=" + std::to_string(api_id) + ", parameter=" + req.parameter;
-
-  return true;
+  return "published api_id=" + std::to_string(api_id) + ", parameter=" + req.parameter;
 }
 
 auto Go2SportBridge::executeSequence(const std::vector<SportCommandStep> & steps, std::string & message) -> bool
@@ -175,10 +173,7 @@ auto Go2SportBridge::executeSequence(const std::vector<SportCommandStep> & steps
   std::string last_message;
 
   for (const auto & s : steps) {
-    if (!publishRequest(s.api_id_, s.parameter_, last_message)) {
-      message = last_message;
-      return false;
-    }
+    last_message = publishRequest(s.api_id_, s.parameter_);
 
     if (s.wait_ms_after_ > 0) {
       std::this_thread::sleep_for(std::chrono::milliseconds(s.wait_ms_after_));
@@ -193,8 +188,7 @@ void Go2SportBridge::cmdVelCallback(geometry_msgs::msg::Twist::SharedPtr msg)
 {
   const auto js = moveJson(msg->linear.x, msg->linear.y, msg->angular.z);
 
-  std::string message;
-  static_cast<void>(publishRequest(static_cast<int32_t>(SportApiId::MOVE), js, message));
+  static_cast<void>(publishRequest(static_cast<int32_t>(SportApiId::MOVE), js));
 }
 
 void Go2SportBridge::handleMode(
@@ -225,8 +219,8 @@ void Go2SportBridge::handleSpeedLevel(
     return;
   }
 
-  response->success =
-    publishRequest(static_cast<int32_t>(SportApiId::SPEED_LEVEL), dataJson(request->level), response->message);
+  response->message = publishRequest(static_cast<int32_t>(SportApiId::SPEED_LEVEL), dataJson(request->level));
+  response->success = true;
 }
 
 void Go2SportBridge::handleSwitchJoystick(
@@ -235,10 +229,9 @@ void Go2SportBridge::handleSwitchJoystick(
 {
   (void)header;
 
-  // go2_interfaces/SwitchJoystick has no message field, so publish into a local sink.
-  std::string message;
-  response->success =
-    publishRequest(static_cast<int32_t>(SportApiId::SWITCH_JOYSTICK), dataJson(request->flag), message);
+  // go2_interfaces/SwitchJoystick has no message field, so discard the description.
+  static_cast<void>(publishRequest(static_cast<int32_t>(SportApiId::SWITCH_JOYSTICK), dataJson(request->flag)));
+  response->success = true;
 }
 
 }  // namespace go2_driver

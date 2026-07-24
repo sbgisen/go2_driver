@@ -114,9 +114,11 @@ Go2SportBridge::Go2SportBridge(const rclcpp::NodeOptions & options) : Node("go2_
 void Go2SportBridge::initPresets()
 {
   presets_ = {
+    // Basic postures and one-shot gestures.
     {"damp", {step(SportApiId::DAMP)}},
     {"balance_stand", {step(SportApiId::BALANCE_STAND)}},
     {"stop_move", {step(SportApiId::STOP_MOVE)}},
+    // stand_up is intentionally not exposed; use recovery_stand / balance_stand instead.
     // {"stand_up", {step(SportApiId::STAND_UP)}},
     {"stand_down", {step(SportApiId::STAND_DOWN)}},
     {"recovery_stand", {step(SportApiId::RECOVERY_STAND)}},
@@ -128,14 +130,17 @@ void Go2SportBridge::initPresets()
     {"dance2", {step(SportApiId::DANCE2)}},
     {"finger_heart", {step(SportApiId::FINGER_HEART)}},
 
+    // Locomotion gaits.
     {"static_walk", {step(SportApiId::STATIC_WALK)}},
     {"trot_run", {step(SportApiId::TROT_RUN)}},
     {"economic_gait", {step(SportApiId::ECONOMIC_GAIT)}},
 
+    // Advanced gaits (enabled with a data flag).
     {"classic_walk", {step(SportApiId::CLASSIC_WALK, dataJson(true))}},
     {"walk_upright", {step(SportApiId::WALK_UPRIGHT, dataJson(true))}},
     {"cross_step", {step(SportApiId::CROSS_STEP, dataJson(true))}},
 
+    // Free / autonomous modes.
     {"free_walk", {step(SportApiId::FREE_WALK)}},
     {"free_bound", {step(SportApiId::FREE_BOUND, dataJson(true))}},
     {"free_jump", {step(SportApiId::FREE_JUMP, dataJson(true))}},
@@ -148,6 +153,7 @@ void Go2SportBridge::initPresets()
     {"back_flip", {step(SportApiId::BACK_FLIP)}},
     {"hand_stand", {step(SportApiId::HAND_STAND, dataJson(true))}},
 
+    // Composite sequences (multiple steps with inter-step delays).
     {"stand_down_damp",
      {
        step(SportApiId::STAND_DOWN, emptyJson(), 2000),

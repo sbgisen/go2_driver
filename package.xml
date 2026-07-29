@@ -4,8 +4,8 @@
   <name>go2_driver</name>
   <version>1.0.0</version>
   <description>GO2 robot driver package</description>
-  <maintainer email="juancarlos.serrano@urjc.es">Juan Carlos Manzanares Serrano</maintainer>
-  <license>Apache License, Version 2.0</license>
+  <maintainer email="SBGRP-git@g.softbank.co.jp">SoftBank Corp.</maintainer>
+  <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 

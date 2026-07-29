@@ -17,6 +17,8 @@ The derived files are:
     src/go2_driver/go2_driver.cpp
     include/go2_driver/go2_driver.hpp
     launch/go2_driver.launch.py
+    CMakeLists.txt
+    package.xml
 
 That original work is distributed under the BSD 3-Clause License. This
 derivative work is relicensed under the Apache License, Version 2.0, which is

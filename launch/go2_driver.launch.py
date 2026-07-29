@@ -17,6 +17,7 @@
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -79,6 +80,10 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument('publish_planar_odom',
                               default_value='true',
                               description='Whether to publish the flattened planar odometry.'))
+    args.append(
+        DeclareLaunchArgument('enable_sport_bridge',
+                              default_value='true',
+                              description='Whether to start the sport bridge (ROS commands -> Sport API).'))
 
     go2_driver = Node(package='go2_driver',
                       executable='go2_driver_node',
@@ -98,6 +103,15 @@ def generate_launch_description() -> LaunchDescription:
                           'publish_planar_odom': _param('publish_planar_odom', bool),
                       }])
 
+    # A separate process from go2_driver on purpose: the state bridge must keep
+    # publishing TF and odometry even if the command bridge is not wanted.
+    go2_sport_bridge = Node(package='go2_driver',
+                            executable='go2_sport_bridge_node',
+                            name='go2_sport_bridge',
+                            output='screen',
+                            condition=IfCondition(LaunchConfiguration('enable_sport_bridge')))
+
     return LaunchDescription(args + [
         go2_driver,
+        go2_sport_bridge,
     ])

@@ -66,7 +66,7 @@ Go2Driver::Go2Driver(const rclcpp::NodeOptions & options) : Node("go2_driver", o
   input_pointcloud_topic_ = declare_parameter<std::string>("input_pointcloud_topic", "/utlidar/cloud");
   input_odom_topic_ = declare_parameter<std::string>("input_odom_topic", "/utlidar/robot_odom");
   output_planar_odom_topic_ = declare_parameter<std::string>("output_planar_odom_topic", "odom_planar");
-  pointcloud_frame_ = declare_parameter<std::string>("pointcloud_frame", "radar");
+  pointcloud_frame_ = declare_parameter<std::string>("pointcloud_frame", "utlidar_lidar");
 
   odom_frame_ = declare_parameter<std::string>("odom_frame", "odom");
   base_footprint_frame_ = declare_parameter<std::string>("base_footprint_frame", "base_footprint");
@@ -145,9 +145,9 @@ void Go2Driver::odomCallback(nav_msgs::msg::Odometry::SharedPtr msg)
   const double body_z = p.z + body_z_offset_;
 
   if (publish_tf_) {
-    tf_broadcaster_.sendTransform(makeTransform(stamp, odom_frame_, base_footprint_frame_, p.x, p.y, 0.0, q_yaw));
     tf_broadcaster_.sendTransform(
-      makeTransform(stamp, base_footprint_frame_, base_link_frame_, 0.0, 0.0, body_z, q_rp));
+      {makeTransform(stamp, odom_frame_, base_footprint_frame_, p.x, p.y, 0.0, q_yaw),
+       makeTransform(stamp, base_footprint_frame_, base_link_frame_, 0.0, 0.0, body_z, q_rp)});
   }
 
   if (publish_planar_odom_) {

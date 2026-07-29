@@ -47,6 +47,12 @@ using SpeedLevelCallback =
   std::function<void(std::shared_ptr<rmw_request_id_t>, go2_interfaces::srv::SpeedLevel::Request::SharedPtr)>;
 using SwitchJoystickCallback =
   std::function<void(std::shared_ptr<rmw_request_id_t>, go2_interfaces::srv::SwitchJoystick::Request::SharedPtr)>;
+using EulerCallback =
+  std::function<void(std::shared_ptr<rmw_request_id_t>, go2_interfaces::srv::Euler::Request::SharedPtr)>;
+using PoseCallback =
+  std::function<void(std::shared_ptr<rmw_request_id_t>, go2_interfaces::srv::Pose::Request::SharedPtr)>;
+using GetAutoRecoveryCallback =
+  std::function<void(std::shared_ptr<rmw_request_id_t>, go2_interfaces::srv::GetAutoRecovery::Request::SharedPtr)>;
 
 auto emptyJson() -> nlohmann::json { return nlohmann::json::object(); }
 
@@ -77,7 +83,8 @@ auto availableModes(const std::unordered_map<std::string, std::vector<SportComma
   return joined;
 }
 
-auto moveJson(double x, double y, double z) -> nlohmann::json
+// Both Move and Euler take their three values under x / y / z.
+auto xyzJson(double x, double y, double z) -> nlohmann::json
 {
   nlohmann::json js;
   js["x"] = x;
@@ -140,6 +147,25 @@ Go2SportBridge::Go2SportBridge(const rclcpp::NodeOptions & options) : Node("go2_
     SwitchJoystickCallback(
       [this](std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::SwitchJoystick::Request::SharedPtr req) {
         handleSwitchJoystick(std::move(header), std::move(req));
+      }));
+
+  euler_service_ = create_service<go2_interfaces::srv::Euler>(
+    "euler",
+    EulerCallback([this](std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::Euler::Request::SharedPtr req) {
+      handleEuler(std::move(header), std::move(req));
+    }));
+
+  pose_service_ = create_service<go2_interfaces::srv::Pose>(
+    "pose",
+    PoseCallback([this](std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::Pose::Request::SharedPtr req) {
+      handlePose(std::move(header), std::move(req));
+    }));
+
+  get_auto_recovery_service_ = create_service<go2_interfaces::srv::GetAutoRecovery>(
+    "get_auto_recovery",
+    GetAutoRecoveryCallback(
+      [this](std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::GetAutoRecovery::Request::SharedPtr req) {
+        handleGetAutoRecovery(std::move(header), std::move(req));
       }));
 
   RCLCPP_INFO(get_logger(), "go2_sport_bridge started");
@@ -278,7 +304,7 @@ void Go2SportBridge::cmdVelCallback(geometry_msgs::msg::Twist::SharedPtr msg)
 {
   // Velocity commands arrive far more often than the robot answers them, so
   // they are never correlated.
-  api_client_->send(static_cast<int32_t>(SportApiId::MOVE), moveJson(msg->linear.x, msg->linear.y, msg->angular.z));
+  api_client_->send(static_cast<int32_t>(SportApiId::MOVE), xyzJson(msg->linear.x, msg->linear.y, msg->angular.z));
 }
 
 void Go2SportBridge::handleMode(
@@ -360,6 +386,97 @@ void Go2SportBridge::handleSwitchJoystick(
     go2_interfaces::srv::SwitchJoystick::Response response;
     response.success = false;
     switch_joystick_service_->send_response(request_id, response);
+  }
+}
+
+void Go2SportBridge::handleEuler(
+  std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::Euler::Request::SharedPtr request)
+{
+  auto request_id = *header;
+  const auto api_id = static_cast<int32_t>(SportApiId::EULER);
+
+  const auto sent = sendRequest(
+    api_id, xyzJson(request->roll, request->pitch, request->yaw), [this, request_id](const ApiResult & result) mutable {
+      go2_interfaces::srv::Euler::Response response;
+      response.success = result.ok_;
+      response.message = describe(api_id, result, wait_for_response_);
+      euler_service_->send_response(request_id, response);
+    });
+
+  if (!sent) {
+    go2_interfaces::srv::Euler::Response response;
+    response.success = false;
+    response.message = "api_id=" + std::to_string(api_id) + " could not be sent";
+    euler_service_->send_response(request_id, response);
+  }
+}
+
+void Go2SportBridge::handlePose(
+  std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::Pose::Request::SharedPtr request)
+{
+  auto request_id = *header;
+  const auto api_id = static_cast<int32_t>(SportApiId::POSE);
+
+  const auto sent = sendRequest(api_id, dataJson(request->flag), [this, request_id](const ApiResult & result) mutable {
+    if (!result.ok_) {
+      // go2_interfaces/Pose carries no message field, so the reason only
+      // reaches the log.
+      RCLCPP_WARN(get_logger(), "pose failed: %s", describe(api_id, result, wait_for_response_).c_str());
+    }
+
+    go2_interfaces::srv::Pose::Response response;
+    response.success = result.ok_;
+    pose_service_->send_response(request_id, response);
+  });
+
+  if (!sent) {
+    go2_interfaces::srv::Pose::Response response;
+    response.success = false;
+    pose_service_->send_response(request_id, response);
+  }
+}
+
+void Go2SportBridge::handleGetAutoRecovery(
+  std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::GetAutoRecovery::Request::SharedPtr request)
+{
+  (void)request;
+
+  auto request_id = *header;
+  const auto api_id = static_cast<int32_t>(SportApiId::AUTO_RECOVERY_GET);
+
+  go2_interfaces::srv::GetAutoRecovery::Response failure;
+  failure.success = false;
+
+  if (!wait_for_response_) {
+    // The answer is the reply itself, so there is nothing to report without it.
+    failure.message = "get_auto_recovery needs wait_for_response to be enabled";
+    get_auto_recovery_service_->send_response(request_id, failure);
+    return;
+  }
+
+  const auto sent = sendRequest(api_id, emptyJson(), [this, request_id](const ApiResult & result) mutable {
+    go2_interfaces::srv::GetAutoRecovery::Response response;
+    response.success = result.ok_;
+    response.message = describe(api_id, result, true);
+
+    if (result.ok_) {
+      // The robot answers {"data": <bool>}; a malformed reply must not throw
+      // out of the subscription callback.
+      const auto parsed = nlohmann::json::parse(result.data_, nullptr, false);
+      if (parsed.is_discarded() || !parsed.contains("data")) {
+        response.success = false;
+        response.message = "could not read a flag out of the reply: " + result.data_;
+      } else {
+        response.enable = parsed["data"].get<bool>();
+      }
+    }
+
+    get_auto_recovery_service_->send_response(request_id, response);
+  });
+
+  if (!sent) {
+    failure.message = "api_id=" + std::to_string(api_id) + " could not be sent";
+    get_auto_recovery_service_->send_response(request_id, failure);
   }
 }
 

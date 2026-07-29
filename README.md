@@ -1,18 +1,22 @@
 # go2_driver
 
-ROS 2 driver for the Unitree Go2. It is a pair of bridges between the robot's
-firmware DDS interface and a standard ROS 2 / Nav2 stack:
+ROS 2 driver for the Unitree Go2. It bridges the robot's firmware DDS interface
+and a standard ROS 2 / Nav2 stack:
 
 | Component | Executable | Direction | Responsibility |
 |---|---|---|---|
 | `go2_driver::Go2Driver` | `go2_driver_node` | robot &rarr; ROS | Joint states, point cloud, dynamic TF, planar odometry |
-| `go2_driver::Go2SportBridge` | `go2_sport_bridge_node` | ROS &rarr; robot | `cmd_vel` and mode services translated to Sport API requests |
+| `go2_driver::Go2SportBridge` | `go2_sport_bridge_node` | ROS &rarr; robot | `cmd_vel` and motion services translated to Sport API requests |
+| `go2_driver::Go2RobotStateBridge` | `go2_robot_state_bridge_node` | ROS &rarr; robot | Start, stop and list the services running inside the robot |
 
-Both are `rclcpp_components` plugins in a single shared library, so they can be
-composed into a container, and both also ship as standalone executables.
+All three are `rclcpp_components` plugins in a single shared library, so they
+can be composed into a container, and all three also ship as standalone
+executables.
 
-They are deliberately kept separate: the state bridge must keep publishing TF
-and odometry even when no one is allowed to command the robot.
+They are deliberately kept apart. The state bridge must keep publishing TF and
+odometry even when no one is allowed to command the robot, and the robot state
+API IDs collide numerically with the sport ones — `SERVICE_SWITCH` and `DAMP`
+are both 1001 — so the two command bridges never share an enum or a publisher.
 
 ## Prerequisites
 
@@ -33,7 +37,7 @@ ros2 launch go2_driver go2_driver.launch.py
 ```
 
 Every `go2_driver` parameter is exposed as a launch argument. The launch file
-starts both bridges.
+starts all three nodes.
 
 Nothing else may own `api/sport/request` at the same time: two command bridges
 would both subscribe to `cmd_vel` and both push Sport API requests, and the
@@ -94,21 +98,37 @@ makes the transform jitter between the two sources.
 ## `go2_sport_bridge` — command bridge
 
 Translates ROS commands into `unitree_api/msg/Request` messages on
-`api/sport/request`. Publishing is fire-and-forget: the bridge does not wait for
-`api/sport/response`, so `success` means "the request was published", not "the
-robot accepted it".
+`api/sport/request`.
+
+Every service waits for the robot's own reply on `api/sport/response`, so
+`success` means the robot reported status code 0 — not merely that a message
+went out. A request the robot never answers fails once the timeout expires.
 
 ### Interfaces
 
 | Kind | Name | Type | Description |
 |---|---|---|---|
 | Publisher | `api/sport/request` | `unitree_api/msg/Request` | Sport API requests |
+| Subscriber | `api/sport/response` | `unitree_api/msg/Response` | Replies, matched to requests by `header.identity.id` |
 | Subscriber | `cmd_vel` | `geometry_msgs/msg/Twist` | Velocity command |
 | Service | `mode` | `go2_interfaces/srv/Mode` | Run a named preset |
 | Service | `speed_level` | `go2_interfaces/srv/SpeedLevel` | Set the movement speed level |
 | Service | `switch_joystick` | `go2_interfaces/srv/SwitchJoystick` | Enable / disable the stock remote |
+| Service | `euler` | `go2_interfaces/srv/Euler` | Body attitude while standing and walking |
+| Service | `pose` | `go2_interfaces/srv/Pose` | Enter / leave pose mode |
+| Service | `get_auto_recovery` | `go2_interfaces/srv/GetAutoRecovery` | Whether the robot stands up by itself after a fall |
 
-The bridge declares no parameters.
+### Parameters
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `wait_for_response` | bool | `true` | Report the robot's status code instead of only that the request was published |
+| `response_timeout` | double | `2.0` | Seconds the robot is given to reply [s] |
+
+Set `wait_for_response:=false` if a firmware version turns out not to answer a
+request you need; services then return `success: true` as soon as the request is
+published, and say "published" rather than "accepted" in `message`.
+`get_auto_recovery` cannot work in that mode, because its answer *is* the reply.
 
 ### `cmd_vel`
 
@@ -134,6 +154,10 @@ Takes one preset name and runs the matching Sport API command, or a short
 sequence of them. An unknown name returns `success: false` with the full list of
 valid presets in `message`.
 
+A sequence runs one step per robot reply and does not block the node, so the
+other services keep answering while it is in flight. Only one sequence runs at a
+time: a second `mode` call during one is rejected rather than queued.
+
 ```bash
 # stand up from damp
 ros2 service call /mode go2_interfaces/srv/Mode "{mode: 'recovery_stand'}"
@@ -154,6 +178,8 @@ Basic postures and gestures:
 | `sit` / `rise_sit` | Sit / stand up from sitting |
 | `hello` | Wave |
 | `stretch` | Stretch |
+| `content` | Look pleased |
+| `scrape` | Scrape a front paw |
 | `dance1` / `dance2` | Dance |
 | `finger_heart` | Finger heart |
 
@@ -178,6 +204,9 @@ Acrobatics — only on a clear, safe surface:
 |---|---|
 | `walk_upright` | Walk on the hind legs |
 | `cross_step` | Walk on two crossed legs |
+| `front_flip` | Front flip |
+| `front_jump` | Jump forwards |
+| `front_pounce` | Pounce forwards |
 | `left_flip` | Flip to the left |
 | `back_flip` | Backflip |
 | `hand_stand` | Handstand |
@@ -214,13 +243,65 @@ means the Sport API request was published, not that the robot accepted it.
 ros2 service call /switch_joystick go2_interfaces/srv/SwitchJoystick "{flag: true}"
 ```
 
+`go2_interfaces/srv/SwitchJoystick` and `srv/Pose` carry no `message` field, so
+when one of them fails the reason is logged instead of returned.
+
+---
+
+## `go2_robot_state_bridge` — robot service control
+
+Talks to the Robot State API on `api/robot_state/request`, which starts, stops
+and lists the services running inside the robot. Added in unitree_ros2 v0.2.0.
+
+Not started by default — see `enable_robot_state_bridge` above.
+
+### Interfaces
+
+| Kind | Name | Type | API ID | Description |
+|---|---|---|---|---|
+| Publisher | `api/robot_state/request` | `unitree_api/msg/Request` | | Robot State API requests |
+| Subscriber | `api/robot_state/response` | `unitree_api/msg/Response` | | Replies, matched by `header.identity.id` |
+| Service | `service_switch` | `go2_interfaces/srv/ServiceSwitch` | 1001 | Start or stop one of the robot's services |
+| Service | `set_report_freq` | `go2_interfaces/srv/SetReportFreq` | 1002 | How often the robot reports its service state |
+| Service | `service_list` | `go2_interfaces/srv/ServiceList` | 1003 | List the services and their versions |
+
+Parameter `response_timeout` (double, default `5.0`) — more generous than the
+sport bridge's, since listing takes longer than acknowledging.
+
+```bash
+# what is running, and at which firmware version
+ros2 service call /service_list go2_interfaces/srv/ServiceList "{}"
+
+# hand the legs to another controller, then give them back
+ros2 service call /service_switch go2_interfaces/srv/ServiceSwitch "{name: 'sport_mode', enable: false}"
+ros2 service call /service_switch go2_interfaces/srv/ServiceSwitch "{name: 'sport_mode', enable: true}"
+
+# report the service state every 3 s for the next 30 s
+ros2 service call /set_report_freq go2_interfaces/srv/SetReportFreq "{interval: 3, duration: 30}"
+```
+
+Services whose `protect` flag is set cannot be switched off.
+
+The robot sends no reply to `set_report_freq`, so that one alone answers as soon
+as the request is published. Its effect is visible on the robot's own
+`/servicestate` topic, which carries the same list as a JSON string.
+
 ## Debugging
 
 | Topic | Contents |
 |---|---|
 | `/lf/sportmodestate` | Sport mode state reported by the robot |
+| `/servicestate` | The robot's own service-state report, as a JSON string |
 | `/api/sport/request` | Requests this package sent |
 | `/api/sport/response` | Replies from the robot; `status.code == 0` means success |
+
+If every service call comes back with "got no reply", check that the robot
+really publishes the response topic and that the QoS is compatible:
+
+```bash
+ros2 topic info /api/sport/response --verbose
+ros2 topic info /api/robot_state/response --verbose
+```
 
 ## License
 

@@ -16,14 +16,15 @@
 #define GO2_DRIVER__GO2_SPORT_BRIDGE_HPP_
 
 #include <geometry_msgs/msg/twist.hpp>
+#include <go2_driver/unitree_api_client.hpp>
 #include <go2_interfaces/srv/mode.hpp>
 #include <go2_interfaces/srv/speed_level.hpp>
 #include <go2_interfaces/srv/switch_joystick.hpp>
 #include <memory>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <rclcpp/rclcpp.hpp>
 #include <string>
-#include <unitree_api/msg/request.hpp>
 #include <unordered_map>
 #include <vector>
 
@@ -43,34 +44,54 @@ public:
   explicit Go2SportBridge(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
 
 private:
+  // A mode preset in the middle of being executed, one step per robot reply.
+  struct SequenceRun
+  {
+    std::string name_;
+    std::vector<SportCommandStep> steps_;
+    std::size_t index_;
+    rmw_request_id_t request_id_;
+    std::string last_message_;
+    bool ok_;
+  };
+
   auto initPresets() -> void;
 
-  // Publishes a Sport API request and returns a human-readable description of it.
-  // Publishing is fire-and-forget, so there is no failure path to report.
-  auto publishRequest(int32_t api_id, const nlohmann::json & parameter) -> std::string;
+  // Sends one Sport API request. Invokes on_result once, with the robot's
+  // reply, or immediately when wait_for_response is disabled.
+  auto sendRequest(int32_t api_id, const nlohmann::json & parameter, ApiResponseCallback on_result) -> bool;
 
-  auto executeSequence(const std::vector<SportCommandStep> & steps, std::string & message) -> bool;
+  auto startSequence(
+    const rmw_request_id_t & request_id, const std::string & name, const std::vector<SportCommandStep> & steps) -> void;
+
+  auto advanceSequence() -> void;
+
+  auto onStepResult(const ApiResult & result) -> void;
+
+  auto finishSequence() -> void;
 
   auto cmdVelCallback(geometry_msgs::msg::Twist::SharedPtr msg) -> void;
 
-  auto handleMode(
-    std::shared_ptr<rmw_request_id_t> header, std::shared_ptr<go2_interfaces::srv::Mode::Request> request,
-    std::shared_ptr<go2_interfaces::srv::Mode::Response> response) -> void;
+  auto handleMode(std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::Mode::Request::SharedPtr request)
+    -> void;
 
   auto handleSpeedLevel(
-    std::shared_ptr<rmw_request_id_t> header, std::shared_ptr<go2_interfaces::srv::SpeedLevel::Request> request,
-    std::shared_ptr<go2_interfaces::srv::SpeedLevel::Response> response) -> void;
+    std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::SpeedLevel::Request::SharedPtr request) -> void;
 
   auto handleSwitchJoystick(
-    std::shared_ptr<rmw_request_id_t> header, std::shared_ptr<go2_interfaces::srv::SwitchJoystick::Request> request,
-    std::shared_ptr<go2_interfaces::srv::SwitchJoystick::Response> response) -> void;
+    std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::SwitchJoystick::Request::SharedPtr request) -> void;
 
-  rclcpp::Publisher<unitree_api::msg::Request>::SharedPtr request_pub_;
+  std::unique_ptr<UnitreeApiClient> api_client_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_sub_;
 
   rclcpp::Service<go2_interfaces::srv::Mode>::SharedPtr mode_service_;
   rclcpp::Service<go2_interfaces::srv::SpeedLevel>::SharedPtr speed_level_service_;
   rclcpp::Service<go2_interfaces::srv::SwitchJoystick>::SharedPtr switch_joystick_service_;
+
+  rclcpp::TimerBase::SharedPtr sequence_timer_;
+  std::optional<SequenceRun> active_sequence_;
+
+  bool wait_for_response_{true};
 
   std::unordered_map<std::string, std::vector<SportCommandStep>> presets_;
 };

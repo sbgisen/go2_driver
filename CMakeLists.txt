@@ -45,7 +45,13 @@ add_library(${PROJECT_NAME} SHARED src/go2_driver/go2_driver.cpp)
 
 ament_target_dependencies(${PROJECT_NAME} ${dependencies})
 
-rclcpp_components_register_nodes(${PROJECT_NAME} "go2_driver::Go2Driver")
+rclcpp_components_register_node(
+  ${PROJECT_NAME}
+  PLUGIN
+  "go2_driver::Go2Driver"
+  EXECUTABLE
+  go2_driver_node
+)
 
 install(
   TARGETS ${PROJECT_NAME}

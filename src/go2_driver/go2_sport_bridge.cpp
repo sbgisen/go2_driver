@@ -164,6 +164,8 @@ void Go2SportBridge::initPresets()
     {"rise_sit", {step(SportApiId::RISE_SIT)}},
     {"hello", {step(SportApiId::HELLO)}},
     {"stretch", {step(SportApiId::STRETCH)}},
+    {"content", {step(SportApiId::CONTENT)}},
+    {"scrape", {step(SportApiId::SCRAPE)}},
     {"dance1", {step(SportApiId::DANCE1)}},
     {"dance2", {step(SportApiId::DANCE2)}},
     {"finger_heart", {step(SportApiId::FINGER_HEART)}},
@@ -187,6 +189,9 @@ void Go2SportBridge::initPresets()
     {"auto_recovery_set", {step(SportApiId::AUTO_RECOVERY_SET, dataJson(true))}},
 
     // WARNING: acrobatic moves. Run only with clear space and a safe surface.
+    {"front_flip", {step(SportApiId::FRONT_FLIP)}},
+    {"front_jump", {step(SportApiId::FRONT_JUMP)}},
+    {"front_pounce", {step(SportApiId::FRONT_POUNCE)}},
     {"left_flip", {step(SportApiId::LEFT_FLIP)}},
     {"back_flip", {step(SportApiId::BACK_FLIP)}},
     {"hand_stand", {step(SportApiId::HAND_STAND, dataJson(true))}},

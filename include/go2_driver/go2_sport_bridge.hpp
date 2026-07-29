@@ -17,7 +17,10 @@
 
 #include <geometry_msgs/msg/twist.hpp>
 #include <go2_driver/unitree_api_client.hpp>
+#include <go2_interfaces/srv/euler.hpp>
+#include <go2_interfaces/srv/get_auto_recovery.hpp>
 #include <go2_interfaces/srv/mode.hpp>
+#include <go2_interfaces/srv/pose.hpp>
 #include <go2_interfaces/srv/speed_level.hpp>
 #include <go2_interfaces/srv/switch_joystick.hpp>
 #include <memory>
@@ -81,12 +84,24 @@ private:
   auto handleSwitchJoystick(
     std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::SwitchJoystick::Request::SharedPtr request) -> void;
 
+  auto handleEuler(std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::Euler::Request::SharedPtr request)
+    -> void;
+
+  auto handlePose(std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::Pose::Request::SharedPtr request)
+    -> void;
+
+  auto handleGetAutoRecovery(
+    std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::GetAutoRecovery::Request::SharedPtr request) -> void;
+
   std::unique_ptr<UnitreeApiClient> api_client_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_sub_;
 
   rclcpp::Service<go2_interfaces::srv::Mode>::SharedPtr mode_service_;
   rclcpp::Service<go2_interfaces::srv::SpeedLevel>::SharedPtr speed_level_service_;
   rclcpp::Service<go2_interfaces::srv::SwitchJoystick>::SharedPtr switch_joystick_service_;
+  rclcpp::Service<go2_interfaces::srv::Euler>::SharedPtr euler_service_;
+  rclcpp::Service<go2_interfaces::srv::Pose>::SharedPtr pose_service_;
+  rclcpp::Service<go2_interfaces::srv::GetAutoRecovery>::SharedPtr get_auto_recovery_service_;
 
   rclcpp::TimerBase::SharedPtr sequence_timer_;
   std::optional<SequenceRun> active_sequence_;

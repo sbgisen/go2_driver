@@ -27,9 +27,11 @@ namespace go2_driver
 namespace
 {
 
-// Inclusive bounds accepted by the Sport API SpeedLevel command.
-constexpr int32_t g_MIN_SPEED_LEVEL = -1;
-constexpr int32_t g_MAX_SPEED_LEVEL = 1;
+// The Sport API SpeedLevel command takes -1 or 1, not the whole [-1, 1] range:
+// the firmware answers 0 with status.code = -1 (measured on the robot, 6/6).
+// Neither unitree_sdk2 nor unitree_ros2 documents or range-checks this.
+constexpr int32_t g_SPEED_LEVEL_LOW = -1;
+constexpr int32_t g_SPEED_LEVEL_HIGH = 1;
 
 auto emptyJson() -> nlohmann::json { return nlohmann::json::object(); }
 
@@ -223,10 +225,10 @@ void Go2SportBridge::handleSpeedLevel(
 {
   (void)header;
 
-  if (request->level < g_MIN_SPEED_LEVEL || request->level > g_MAX_SPEED_LEVEL) {
+  if (request->level != g_SPEED_LEVEL_LOW && request->level != g_SPEED_LEVEL_HIGH) {
     response->success = false;
-    response->message =
-      "level is out of range [" + std::to_string(g_MIN_SPEED_LEVEL) + ", " + std::to_string(g_MAX_SPEED_LEVEL) + "]";
+    response->message = "level must be " + std::to_string(g_SPEED_LEVEL_LOW) + " or " +
+                        std::to_string(g_SPEED_LEVEL_HIGH) + ", got " + std::to_string(request->level);
     return;
   }
 

@@ -203,7 +203,10 @@ must not be added back: current firmware ignores them. They are listed in
 ros2 service call /speed_level go2_interfaces/srv/SpeedLevel "{level: 1}"
 ```
 
-Valid range is `[-1, 1]`; anything else is rejected with `success: false`.
+`level` must be `-1` or `1`; anything else is rejected with `success: false`.
+`0` is **not** valid even though it sits between them — the firmware answers it
+with `status.code: -1` on `/api/sport/response`. Note that `success: true` only
+means the Sport API request was published, not that the robot accepted it.
 
 ### `switch_joystick`
 

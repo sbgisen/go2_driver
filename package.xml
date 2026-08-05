@@ -17,7 +17,7 @@
   <depend>unitree_go</depend>
   <depend>unitree_api</depend>
   <depend>go2_interfaces</depend>
-  <depend>nlohmann-json</depend>
+  <depend>nlohmann-json-dev</depend>
   <depend>tf2</depend>
   <depend>tf2_ros</depend>
   <depend>tf2_geometry_msgs</depend>

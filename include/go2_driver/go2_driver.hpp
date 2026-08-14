@@ -54,6 +54,9 @@ private:
 
   tf2_ros::TransformBroadcaster tf_broadcaster_;
 
+  // Stamp of the most recently broadcast odom-driven TF. Zero until the first broadcast.
+  rclcpp::Time last_tf_stamp_{0, 0, RCL_ROS_TIME};
+
   std::string input_pointcloud_topic_;
   std::string input_odom_topic_;
   std::string pointcloud_frame_;

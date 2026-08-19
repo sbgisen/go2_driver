@@ -17,7 +17,6 @@
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -68,12 +67,6 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument('publish_odom',
                               default_value='true',
                               description='Whether to republish the Unitree odometry.'))
-    args.append(
-        DeclareLaunchArgument('enable_sport_bridge',
-                              default_value='false',
-                              description='Whether to start the sport bridge (ROS commands -> Sport API). Off by '
-                              'default so that this package can be adopted while another node still owns '
-                              'api/sport/request; two command bridges would both act on cmd_vel.'))
 
     go2_driver = Node(package='go2_driver',
                       executable='go2_driver_node',
@@ -97,8 +90,7 @@ def generate_launch_description() -> LaunchDescription:
     go2_sport_bridge = Node(package='go2_driver',
                             executable='go2_sport_bridge_node',
                             name='go2_sport_bridge',
-                            output='screen',
-                            condition=IfCondition(LaunchConfiguration('enable_sport_bridge')))
+                            output='screen')
 
     return LaunchDescription(args + [
         go2_driver,

@@ -42,8 +42,8 @@ starts all three nodes.
 Nothing else may own `api/sport/request` at the same time: two command bridges
 would both subscribe to `cmd_vel` and both push Sport API requests, and the
 robot would act on the merged stream. Stop the other bridge before adopting
-this launch file, or write your own launch file that starts only
-`go2_driver_node`.
+this launch file, or write your own launch file that starts only the nodes you
+want.
 
 ---
 
@@ -253,7 +253,9 @@ when one of them fails the reason is logged instead of returned.
 Talks to the Robot State API on `api/robot_state/request`, which starts, stops
 and lists the services running inside the robot. Added in unitree_ros2 v0.2.0.
 
-Not started by default — see `enable_robot_state_bridge` above.
+Starting this node is harmless on its own — it only exposes the services. The
+risk is in calling them: `service_switch` can stop the robot's own services,
+`sport_mode` included, which disables the walking controller.
 
 ### Interfaces
 

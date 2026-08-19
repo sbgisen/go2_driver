@@ -32,17 +32,14 @@ definitions.
 ros2 launch go2_driver go2_driver.launch.py
 ```
 
-Every `go2_driver` parameter is exposed as a launch argument. One extra argument
-controls what is started:
+Every `go2_driver` parameter is exposed as a launch argument. The launch file
+starts both bridges.
 
-| Argument | Default | Description |
-|---|---|---|
-| `enable_sport_bridge` | `false` | Start `go2_sport_bridge_node` as well |
-
-The command bridge is off by default so this package can be adopted while
-another node still owns `api/sport/request` — two command bridges would both
-subscribe to `cmd_vel` and both push Sport API requests. Enable it with
-`enable_sport_bridge:=true` once nothing else commands the robot.
+Nothing else may own `api/sport/request` at the same time: two command bridges
+would both subscribe to `cmd_vel` and both push Sport API requests, and the
+robot would act on the merged stream. Stop the other bridge before adopting
+this launch file, or write your own launch file that starts only
+`go2_driver_node`.
 
 ---
 

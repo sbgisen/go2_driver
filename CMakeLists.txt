@@ -18,6 +18,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
+find_package(builtin_interfaces REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
@@ -30,6 +31,7 @@ set(
   dependencies
   rclcpp
   rclcpp_components
+  builtin_interfaces
   sensor_msgs
   geometry_msgs
   nav_msgs

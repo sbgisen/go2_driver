@@ -107,8 +107,7 @@ def generate_launch_description() -> LaunchDescription:
     go2_robot_state_bridge = Node(package='go2_driver',
                                   executable='go2_robot_state_bridge_node',
                                   name='go2_robot_state_bridge',
-                                  output='screen',
-                                  condition=IfCondition(LaunchConfiguration('enable_robot_state_bridge')))
+                                  output='screen')
 
     return LaunchDescription(args + [
         go2_driver,

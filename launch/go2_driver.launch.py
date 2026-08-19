@@ -82,8 +82,10 @@ def generate_launch_description() -> LaunchDescription:
                               description='Whether to publish the flattened planar odometry.'))
     args.append(
         DeclareLaunchArgument('enable_sport_bridge',
-                              default_value='true',
-                              description='Whether to start the sport bridge (ROS commands -> Sport API).'))
+                              default_value='false',
+                              description='Whether to start the sport bridge (ROS commands -> Sport API). Off by '
+                              'default so that this package can be adopted while another node still owns '
+                              'api/sport/request; two command bridges would both act on cmd_vel.'))
 
     go2_driver = Node(package='go2_driver',
                       executable='go2_driver_node',

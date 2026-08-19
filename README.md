@@ -37,9 +37,12 @@ controls what is started:
 
 | Argument | Default | Description |
 |---|---|---|
-| `enable_sport_bridge` | `true` | Start `go2_sport_bridge_node` as well |
+| `enable_sport_bridge` | `false` | Start `go2_sport_bridge_node` as well |
 
-Run the state bridge alone with `enable_sport_bridge:=false`.
+The command bridge is off by default so this package can be adopted while
+another node still owns `api/sport/request` — two command bridges would both
+subscribe to `cmd_vel` and both push Sport API requests. Enable it with
+`enable_sport_bridge:=true` once nothing else commands the robot.
 
 ---
 

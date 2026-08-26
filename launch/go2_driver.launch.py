@@ -79,6 +79,12 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument('publish_planar_odom',
                               default_value='true',
                               description='Whether to publish the flattened planar odometry.'))
+    args.append(
+        DeclareLaunchArgument(
+            'wait_for_response',
+            default_value='true',
+            description="Sport bridge: report the robot's status code instead of only that the request was sent."))
+
     go2_driver = Node(package='go2_driver',
                       executable='go2_driver_node',
                       name='go2_driver',
@@ -99,11 +105,21 @@ def generate_launch_description() -> LaunchDescription:
 
     # A separate process from go2_driver on purpose: the state bridge must keep
     # publishing TF and odometry even if the command bridge is not wanted.
+    # response_timeout is deliberately not a launch argument: the two bridges
+    # have different defaults (listing services takes longer than acknowledging
+    # a command), so one shared value would be wrong for one of them. Override
+    # it per node with --ros-args -p if a slow link needs it.
     go2_sport_bridge = Node(package='go2_driver',
                             executable='go2_sport_bridge_node',
                             name='go2_sport_bridge',
-                            output='screen')
+                            output='screen',
+                            parameters=[{
+                                'wait_for_response': _param('wait_for_response', bool),
+                            }])
 
+    # No wait_for_response here: Go2RobotStateBridge does not declare one. It
+    # always waits, because every one of its services is a query whose answer is
+    # the point of calling it.
     go2_robot_state_bridge = Node(package='go2_driver',
                                   executable='go2_robot_state_bridge_node',
                                   name='go2_robot_state_bridge',

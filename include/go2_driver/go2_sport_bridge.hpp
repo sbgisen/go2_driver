@@ -60,8 +60,7 @@ private:
 
   auto initPresets() -> void;
 
-  // Sends one Sport API request. Invokes on_result once, with the robot's
-  // reply, or immediately when wait_for_response is disabled.
+  // Invokes on_result once: on the reply, or at once without wait_for_response.
   auto sendRequest(int32_t api_id, const nlohmann::json & parameter, ApiResponseCallback on_result) -> bool;
 
   auto startSequence(

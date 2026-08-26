@@ -43,13 +43,8 @@ struct ApiResult
 
 using ApiResponseCallback = std::function<void(const ApiResult &)>;
 
-// Publishes unitree_api requests and matches the robot's replies back to them
-// on header.identity.id.
-//
-// Not thread-safe by design: every method, and every callback it invokes, must
-// run on a single executor thread. Both bridges in this package are hosted in
-// their own single-threaded process, so no locking is needed. Hosting one of
-// them in component_container_mt would require guarding pending_ with a mutex.
+// Correlates requests and replies on header.identity.id.
+// Not thread-safe: every method and callback must run on one executor thread.
 class UnitreeApiClient
 {
 public:
@@ -57,15 +52,12 @@ public:
     rclcpp::Node * node, const std::string & request_topic, const std::string & response_topic,
     std::chrono::milliseconds timeout);
 
-  // Publishes without asking for a reply. Use it for commands sent at a high
-  // rate, and for api ids the firmware never answers.
+  // Publishes without asking for a reply.
   auto send(int32_t api_id, const nlohmann::json & parameter, bool noreply = false) -> void;
 
-  // Publishes and invokes on_response exactly once, either with the robot's
-  // reply or, after the timeout, with a failed ApiResult.
+  // Invokes on_response exactly once: on the reply, or on the timeout.
   //
-  // Returns false without publishing when too many calls are already in
-  // flight, which is what happens when the robot answers nothing at all.
+  // Returns false without publishing when too many calls are in flight.
   auto call(int32_t api_id, const nlohmann::json & parameter, ApiResponseCallback on_response) -> bool;
 
   auto pendingCount() const -> std::size_t;

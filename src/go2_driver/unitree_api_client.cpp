@@ -30,12 +30,10 @@ constexpr int32_t g_STATUS_OK = 0;
 // Status code reported to the caller when the robot never replied.
 constexpr int32_t g_STATUS_TIMEOUT = -1;
 
-// How often expired requests are collected. Requests are answered as soon as a
-// reply arrives, so this only bounds how late a timeout is noticed.
+// Only bounds how late a timeout is noticed; replies are answered at once.
 constexpr int g_SWEEP_PERIOD_MS = 100;
 
-// Upper bound on requests waiting for a reply. Reached only when the robot
-// answers nothing; without it a silent firmware would grow pending_ forever.
+// Bounds pending_ if the robot stops answering entirely.
 constexpr std::size_t g_MAX_PENDING = 64;
 
 constexpr int g_QOS_DEPTH = 10;
@@ -93,8 +91,7 @@ void UnitreeApiClient::responseCallback(unitree_api::msg::Response::SharedPtr ms
 {
   const auto it = pending_.find(msg->header.identity.id);
   if (it == pending_.end()) {
-    // Every node on the robot's DDS domain sees every reply, so replies to
-    // other senders are the normal case rather than an error.
+    // Every node on the robot's DDS domain sees every reply.
     RCLCPP_DEBUG(node_->get_logger(), "ignoring reply for id=%ld", msg->header.identity.id);
     return;
   }
@@ -106,8 +103,8 @@ void UnitreeApiClient::responseCallback(unitree_api::msg::Response::SharedPtr ms
   }
 
   const auto callback = it->second.callback_;
-  // Erase before invoking so the callback may start another call, and so a
-  // duplicate reply cannot answer the same request twice.
+  // Erase first: the callback may start another call, and a duplicate reply
+  // must not answer the same request twice.
   pending_.erase(it);
 
   const auto code = msg->header.status.code;
@@ -134,8 +131,7 @@ void UnitreeApiClient::sweepTimeouts()
     it = pending_.erase(it);
   }
 
-  // Invoked after the sweep so a callback that starts another call cannot
-  // invalidate the iterator.
+  // After the sweep: a callback may start another call.
   for (const auto & callback : expired) {
     callback(ApiResult{false, g_STATUS_TIMEOUT, ""});
   }
@@ -143,10 +139,8 @@ void UnitreeApiClient::sweepTimeouts()
 
 auto UnitreeApiClient::nextId() -> int64_t
 {
-  // Nanoseconds since boot, like unitree_ros2's clients. Every node shares the
-  // robot's DDS domain, so ids have to be unique across processes too, which
-  // rules out a plain counter. The max() keeps ids unique within this process
-  // when two requests land in the same clock tick.
+  // Nanoseconds since boot, like unitree_ros2's clients: ids must be unique
+  // across processes on the shared DDS domain, so a counter will not do.
   const auto now = std::chrono::steady_clock::now().time_since_epoch();
   const auto id = std::chrono::duration_cast<std::chrono::nanoseconds>(now).count();
 

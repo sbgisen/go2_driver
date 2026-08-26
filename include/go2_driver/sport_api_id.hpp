@@ -31,18 +31,25 @@ enum class SportApiId : int32_t
   STAND_UP = 1004,
   STAND_DOWN = 1005,
   RECOVERY_STAND = 1006,
+  EULER = 1007,
 
   MOVE = 1008,
   SIT = 1009,
   RISE_SIT = 1010,
   HELLO = 1016,
   STRETCH = 1017,
+  CONTENT = 1020,
   DANCE1 = 1022,
   DANCE2 = 1023,
+  SCRAPE = 1029,
+  FRONT_FLIP = 1030,
+  FRONT_JUMP = 1031,
+  FRONT_POUNCE = 1032,
   FINGER_HEART = 1036,
 
   SPEED_LEVEL = 1015,
   SWITCH_JOYSTICK = 1027,
+  POSE = 1028,
 
   STATIC_WALK = 1061,
   TROT_RUN = 1062,
@@ -59,7 +66,7 @@ enum class SportApiId : int32_t
   WALK_UPRIGHT = 2050,
   CROSS_STEP = 2051,
   AUTO_RECOVERY_SET = 2054,
-  AUTO_RECOVERY_GET = 2055,  // getter: returns a value, not used by the publish-only controller
+  AUTO_RECOVERY_GET = 2055,
   SWITCH_AVOID_MODE = 2058,
 };
 

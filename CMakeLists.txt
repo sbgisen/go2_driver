@@ -46,7 +46,13 @@ set(
 
 include_directories(include)
 
-add_library(${PROJECT_NAME} SHARED src/go2_driver/go2_driver.cpp src/go2_driver/go2_sport_bridge.cpp)
+add_library(
+  ${PROJECT_NAME} SHARED
+  src/go2_driver/go2_driver.cpp
+  src/go2_driver/go2_robot_state_bridge.cpp
+  src/go2_driver/go2_sport_bridge.cpp
+  src/go2_driver/unitree_api_client.cpp
+)
 
 ament_target_dependencies(${PROJECT_NAME} ${dependencies})
 target_link_libraries(${PROJECT_NAME} nlohmann_json::nlohmann_json)
@@ -65,6 +71,14 @@ rclcpp_components_register_node(
   "go2_driver::Go2SportBridge"
   EXECUTABLE
   go2_sport_bridge_node
+)
+
+rclcpp_components_register_node(
+  ${PROJECT_NAME}
+  PLUGIN
+  "go2_driver::Go2RobotStateBridge"
+  EXECUTABLE
+  go2_robot_state_bridge_node
 )
 
 install(

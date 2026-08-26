@@ -26,10 +26,6 @@ namespace go2_driver
 {
 
 // Starts, stops and lists the services running inside the robot.
-//
-// Kept apart from Go2SportBridge on purpose: this is configuration of the
-// robot rather than motion, it talks on a different topic pair, and its api
-// ids collide numerically with the sport ones.
 class Go2RobotStateBridge : public rclcpp::Node
 {
 public:

@@ -23,10 +23,8 @@ namespace go2_driver
 // Robot State API, added in unitree_ros2 v0.2.0:
 //   https://github.com/unitreerobotics/unitree_ros2/releases/tag/v0.2.0
 //
-// WARNING: these values overlap numerically with SportApiId (DAMP is also
-// 1001). They are only ever published on api/robot_state/request, never on
-// api/sport/request, which is why the two enums live in separate components.
-// Sending 1001 to the wrong topic makes the robot collapse.
+// WARNING: these overlap numerically with SportApiId -- 1001 is ServiceSwitch
+// here and Damp there. Publish them on api/robot_state/request only.
 //
 // NOLINTNEXTLINE(performance-enum-size)
 enum class RobotStateApiId : int32_t

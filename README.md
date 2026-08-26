@@ -114,7 +114,7 @@ went out. A request the robot never answers fails once the timeout expires.
 | Service | `mode` | `go2_interfaces/srv/Mode` | Run a named preset |
 | Service | `speed_level` | `go2_interfaces/srv/SpeedLevel` | Set the movement speed level |
 | Service | `switch_joystick` | `go2_interfaces/srv/SwitchJoystick` | Enable / disable the stock remote |
-| Service | `euler` | `go2_interfaces/srv/Euler` | Body attitude while standing and walking |
+| Service | `euler` | `go2_interfaces/srv/Euler` | Body attitude while standing and walking (see `pose`) |
 | Service | `pose` | `go2_interfaces/srv/Pose` | Enter / leave pose mode |
 | Service | `get_auto_recovery` | `go2_interfaces/srv/GetAutoRecovery` | Whether the robot stands up by itself after a fall |
 
@@ -129,6 +129,10 @@ Set `wait_for_response:=false` if a firmware version turns out not to answer a
 request you need; services then return `success: true` as soon as the request is
 published, and say "published" rather than "accepted" in `message`.
 `get_auto_recovery` cannot work in that mode, because its answer *is* the reply.
+The launch file declares it as an argument for this node only —
+`go2_robot_state_bridge` always waits, since each of its services is a query.
+`response_timeout` is not a launch argument, because the two bridges want
+different values; override it per node with `--ros-args -p` if you need to.
 
 ### `cmd_vel`
 
@@ -138,7 +142,10 @@ published, and say "published" rather than "accepted" in `message`.
 |---|---|
 | `linear.x` | `x` |
 | `linear.y` | `y` |
-| `angular.z` | `z` |
+| `angular.z` | `yaw` |
+
+The velocities are in the body frame, and the firmware clamps them to
+`x` [-2.5, 3.8] m/s, `y` [-1.0, 1.0] m/s, `yaw` [-4, 4] rad/s.
 
 ```bash
 ros2 topic pub /cmd_vel geometry_msgs/msg/Twist \
@@ -147,6 +154,12 @@ ros2 topic pub /cmd_vel geometry_msgs/msg/Twist \
 
 The robot has to be in a walkable mode (for example `stop_move`) before it
 reacts to a velocity command.
+
+**The robot holds the last `Move` for one second and does not filter it.**
+Unitree documents both properties, so a `cmd_vel` stream that simply stops
+leaves the robot walking for up to a second. Send `Move(0, 0, 0)` — a zero
+`Twist` — or call `mode: 'stop_move'` when you stop steering, and filter the
+command before publishing rather than relying on the firmware to smooth it.
 
 ### `mode`
 
@@ -198,7 +211,10 @@ Gaits:
 | `switch_avoid_mode` | Toggle the obstacle avoidance mode |
 | `auto_recovery_set` | Enable automatic recovery after a fall |
 
-Acrobatics — only on a clear, safe surface:
+Acrobatics — only on a clear, safe surface. `front_flip`, `back_flip`,
+`left_flip` and `hand_stand` are **refused**: they invert the robot and would
+destroy a payload, so `mode` answers `success: false` without sending anything.
+Publish the Sport API id on `api/sport/request` yourself if you really mean it.
 
 | Preset | Description |
 |---|---|
@@ -226,6 +242,22 @@ Sport API IDs removed in [unitree_ros2 v0.2.0](https://github.com/unitreerobotic
 must not be added back: current firmware ignores them. They are listed in
 `include/go2_driver/sport_api_id.hpp` so their values are not reused.
 
+### `euler` and `pose`
+
+`euler` sets the body attitude, in radians, with the firmware clamping to
+`roll` and `pitch` [-0.75, 0.75] and `yaw` [-0.6, 0.6].
+
+**Call `pose` with `flag: true` first.** Outside pose mode the robot accepts the
+request and reports success, but the attitude either does not change or springs
+back: the movement peaks after about half a second and is level again after one,
+so a single `ros2 topic echo` of the resulting TF will usually miss it entirely.
+
+```bash
+ros2 service call /pose go2_interfaces/srv/Pose "{flag: true}"
+ros2 service call /euler go2_interfaces/srv/Euler "{roll: 0.0, pitch: 0.3, yaw: 0.0}"
+ros2 service call /pose go2_interfaces/srv/Pose "{flag: false}"
+```
+
 ### `speed_level`
 
 ```bash
@@ -233,9 +265,9 @@ ros2 service call /speed_level go2_interfaces/srv/SpeedLevel "{level: 1}"
 ```
 
 `level` must be `-1` or `1`; anything else is rejected with `success: false`.
-`0` is **not** valid even though it sits between them — the firmware answers it
-with `status.code: -1` on `/api/sport/response`. Note that `success: true` only
-means the Sport API request was published, not that the robot accepted it.
+`0` is **not** valid even though it sits between them — Unitree documents it as
+"normal speed", but the firmware answers it with `status.code: -1` (measured 6/6
+on 2026-08-05 and 3/3 again on 2026-08-26).
 
 ### `switch_joystick`
 
@@ -265,24 +297,37 @@ risk is in calling them: `service_switch` can stop the robot's own services,
 | Subscriber | `api/robot_state/response` | `unitree_api/msg/Response` | | Replies, matched by `header.identity.id` |
 | Service | `service_switch` | `go2_interfaces/srv/ServiceSwitch` | 1001 | Start or stop one of the robot's services |
 | Service | `set_report_freq` | `go2_interfaces/srv/SetReportFreq` | 1002 | How often the robot reports its service state |
-| Service | `service_list` | `go2_interfaces/srv/ServiceList` | 1003 | List the services and their versions |
+| Service | `service_list` | `go2_interfaces/srv/ServiceList` | 1003 | List the services with their status and protect flags |
 
 Parameter `response_timeout` (double, default `5.0`) — more generous than the
 sport bridge's, since listing takes longer than acknowledging.
 
 ```bash
-# what is running, and at which firmware version
+# what is running
 ros2 service call /service_list go2_interfaces/srv/ServiceList "{}"
 
-# hand the legs to another controller, then give them back
-ros2 service call /service_switch go2_interfaces/srv/ServiceSwitch "{name: 'sport_mode', enable: false}"
-ros2 service call /service_switch go2_interfaces/srv/ServiceSwitch "{name: 'sport_mode', enable: true}"
+# restart a service that was switched off
+ros2 service call /service_switch go2_interfaces/srv/ServiceSwitch "{name: 'ota_box', enable: true}"
 
 # report the service state every 3 s for the next 30 s
 ros2 service call /set_report_freq go2_interfaces/srv/SetReportFreq "{interval: 3, duration: 30}"
 ```
 
-Services whose `protect` flag is set cannot be switched off.
+**`status` is 0 for running and 1 for stopped** — the opposite of what the
+numbers suggest. `enable: true` therefore drives `status` from 1 to 0.
+
+`service_list` reports `name`, `status` and `protect` only. It carries no
+version field; the robot's own `/servicestate` topic does, and
+`set_report_freq` is what makes that topic flow.
+
+Services whose `protect` flag is set cannot be switched off; the robot answers
+5202. A switch that fails for any other reason answers 5201.
+
+Which service drives the legs depends on the firmware: `sport_mode` below
+V1.1.6, `mcf` from V1.1.6 on. Both names appear in `service_list`, so read the
+`status` rather than the presence of a name to tell which one is live. Switching
+the live one off is not a way to make the robot safe — it keeps accepting sport
+commands, and the flag returns on its own.
 
 The robot sends no reply to `set_report_freq`, so that one alone answers as soon
 as the request is published. Its effect is visible on the robot's own

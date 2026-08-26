@@ -17,6 +17,8 @@
 #include <algorithm>
 #include <chrono>
 #include <functional>
+#include <set>
+#include <string>
 #include <utility>
 
 #include "go2_driver/sport_api_id.hpp"
@@ -27,8 +29,12 @@ namespace go2_driver
 namespace
 {
 
+// Refused rather than sent: these invert the robot.
+const std::set<std::string> g_BLOCKED_MODES{"front_flip", "back_flip", "left_flip", "hand_stand"};
+
 // The Sport API SpeedLevel command takes -1 or 1, not the whole [-1, 1] range:
-// the firmware answers 0 with status.code = -1 (measured on the robot, 6/6).
+// the firmware answers 0 with status.code = -1 (measured on the robot, 6/6 on
+// 2026-08-05 and again 3/3 on 2026-08-26).
 // Neither unitree_sdk2 nor unitree_ros2 documents or range-checks this.
 constexpr int32_t g_SPEED_LEVEL_LOW = -1;
 constexpr int32_t g_SPEED_LEVEL_HIGH = 1;
@@ -38,9 +44,8 @@ constexpr double g_DEFAULT_RESPONSE_TIMEOUT = 2.0;
 
 constexpr int g_QOS_DEPTH = 10;
 
-// rclcpp picks the deferred service callback by exact signature: it takes no
-// response argument, and that is what stops rclcpp from answering the caller
-// as soon as the handler returns.
+// rclcpp picks the deferred callback by signature: no response argument means
+// rclcpp does not answer the caller when the handler returns.
 using ModeCallback =
   std::function<void(std::shared_ptr<rmw_request_id_t>, go2_interfaces::srv::Mode::Request::SharedPtr)>;
 using SpeedLevelCallback =
@@ -102,7 +107,7 @@ auto describe(int32_t api_id, const ApiResult & result, bool waited) -> std::str
 {
   const auto prefix = "api_id=" + std::to_string(api_id);
   if (!waited) {
-    // Nothing was checked, so the wording must not imply the robot agreed.
+    // Nothing was checked, so do not imply the robot agreed.
     return prefix + " published";
   }
   if (result.ok_) {
@@ -246,6 +251,15 @@ auto Go2SportBridge::sendRequest(int32_t api_id, const nlohmann::json & paramete
 void Go2SportBridge::startSequence(
   const rmw_request_id_t & request_id, const std::string & name, const std::vector<SportCommandStep> & steps)
 {
+  if (steps.empty()) {
+    auto id = request_id;
+    go2_interfaces::srv::Mode::Response response;
+    response.success = false;
+    response.message = "mode " + name + ": the preset has no steps";
+    mode_service_->send_response(id, response);
+    return;
+  }
+
   active_sequence_ = SequenceRun{name, steps, 0, request_id, "", true};
   advanceSequence();
 }
@@ -279,8 +293,13 @@ void Go2SportBridge::onStepResult(const ApiResult & result)
   run.last_message_ = describe(run.steps_[run.index_].api_id_, result, wait_for_response_);
   ++run.index_;
 
-  // Even a zero wait goes back through the timer rather than recursing, so the
-  // executor stays free between the steps of a sequence.
+  // Later steps assume the earlier ones took effect.
+  if (!result.ok_) {
+    finishSequence();
+    return;
+  }
+
+  // Via the timer even for a zero wait.
   sequence_timer_ = create_wall_timer(wait, [this] {
     sequence_timer_->cancel();
     advanceSequence();
@@ -302,9 +321,9 @@ void Go2SportBridge::finishSequence()
 
 void Go2SportBridge::cmdVelCallback(geometry_msgs::msg::Twist::SharedPtr msg)
 {
-  // Velocity commands arrive far more often than the robot answers them, so
-  // they are never correlated.
-  api_client_->send(static_cast<int32_t>(SportApiId::MOVE), xyzJson(msg->linear.x, msg->linear.y, msg->angular.z));
+  // noreply: at cmd_vel rates the replies would only be discarded.
+  api_client_->send(
+    static_cast<int32_t>(SportApiId::MOVE), xyzJson(msg->linear.x, msg->linear.y, msg->angular.z), true);
 }
 
 void Go2SportBridge::handleMode(
@@ -320,8 +339,15 @@ void Go2SportBridge::handleMode(
     return;
   }
 
+  if (g_BLOCKED_MODES.count(request->mode) != 0) {
+    response.message = request->mode +
+                       " is disabled: it inverts the robot and would destroy a payload. "
+                       "Send the Sport API id directly on api/sport/request if you really mean it.";
+    mode_service_->send_response(*header, response);
+    return;
+  }
+
   if (active_sequence_.has_value()) {
-    // Only reachable now that a sequence no longer blocks the executor.
     response.message = "another mode sequence is in progress: " + active_sequence_->name_;
     mode_service_->send_response(*header, response);
     return;
@@ -333,13 +359,10 @@ void Go2SportBridge::handleMode(
 void Go2SportBridge::handleSpeedLevel(
   std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::SpeedLevel::Request::SharedPtr request)
 {
-  // send_response takes the id by non-const reference, so every copy that
-  // reaches it is a mutable one.
+  // send_response takes the id by non-const reference.
   auto request_id = *header;
   const auto api_id = static_cast<int32_t>(SportApiId::SPEED_LEVEL);
 
-  // The two-value check comes from this branch's base; only the way the answer
-  // is sent changes here.
   if (request->level != g_SPEED_LEVEL_LOW && request->level != g_SPEED_LEVEL_HIGH) {
     go2_interfaces::srv::SpeedLevel::Response response;
     response.success = false;
@@ -372,8 +395,7 @@ void Go2SportBridge::handleSwitchJoystick(
 
   const auto sent = sendRequest(api_id, dataJson(request->flag), [this, request_id](const ApiResult & result) mutable {
     if (!result.ok_) {
-      // go2_interfaces/SwitchJoystick carries no message field, so the reason
-      // only reaches the log.
+      // SwitchJoystick carries no message field.
       RCLCPP_WARN(get_logger(), "switch_joystick failed: %s", describe(api_id, result, wait_for_response_).c_str());
     }
 
@@ -419,8 +441,7 @@ void Go2SportBridge::handlePose(
 
   const auto sent = sendRequest(api_id, dataJson(request->flag), [this, request_id](const ApiResult & result) mutable {
     if (!result.ok_) {
-      // go2_interfaces/Pose carries no message field, so the reason only
-      // reaches the log.
+      // Pose carries no message field.
       RCLCPP_WARN(get_logger(), "pose failed: %s", describe(api_id, result, wait_for_response_).c_str());
     }
 
@@ -460,10 +481,9 @@ void Go2SportBridge::handleGetAutoRecovery(
     response.message = describe(api_id, result, true);
 
     if (result.ok_) {
-      // The robot answers {"data": <bool>}; a malformed reply must not throw
-      // out of the subscription callback.
+      // The robot answers {"data": <bool>}.
       const auto parsed = nlohmann::json::parse(result.data_, nullptr, false);
-      if (parsed.is_discarded() || !parsed.contains("data")) {
+      if (parsed.is_discarded() || !parsed.contains("data") || !parsed["data"].is_boolean()) {
         response.success = false;
         response.message = "could not read a flag out of the reply: " + result.data_;
       } else {

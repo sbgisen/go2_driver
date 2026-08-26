@@ -27,9 +27,7 @@ namespace go2_driver
 namespace
 {
 
-// Seconds the robot is given to answer. Listing its services takes noticeably
-// longer than acknowledging a switch, so this is more generous than the sport
-// bridge's default.
+// Listing services takes longer than acknowledging a switch.
 constexpr double g_DEFAULT_RESPONSE_TIMEOUT = 5.0;
 
 using ServiceSwitchCallback =
@@ -104,7 +102,7 @@ void Go2RobotStateBridge::handleServiceSwitch(
 
     if (result.ok_) {
       const auto parsed = nlohmann::json::parse(result.data_, nullptr, false);
-      if (parsed.is_discarded() || !parsed.contains("status")) {
+      if (parsed.is_discarded() || !parsed.contains("status") || !parsed["status"].is_number_integer()) {
         response.success = false;
         response.message = "could not read a status out of the reply: " + result.data_;
       } else {
@@ -164,13 +162,19 @@ void Go2RobotStateBridge::handleServiceList(
           response.message = "could not read a service list out of the reply: " + result.data_;
         } else {
           for (const auto & entry : parsed) {
+            // value() guards a missing key only, not a wrong-typed one.
+            if (!entry.is_object()) {
+              continue;
+            }
             go2_interfaces::msg::ServiceState state;
-            // value() rather than at(): a firmware that stops reporting one of
-            // these should still yield a usable list.
-            state.name = entry.value("name", "");
-            state.status = entry.value("status", 0);
-            state.protect = entry.value("protect", 0);
-            state.version = entry.value("version", "");
+            state.name = entry.contains("name") && entry["name"].is_string() ? entry["name"].get<std::string>() : "";
+            state.status =
+              entry.contains("status") && entry["status"].is_number_integer() ? entry["status"].get<int32_t>() : 0;
+            state.protect =
+              entry.contains("protect") && entry["protect"].is_number_integer() ? entry["protect"].get<int32_t>() : 0;
+            // ServiceList carries no version; the robot's /servicestate does.
+            state.version =
+              entry.contains("version") && entry["version"].is_string() ? entry["version"].get<std::string>() : "";
             response.services.push_back(state);
           }
         }

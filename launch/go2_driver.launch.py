@@ -36,18 +36,6 @@ def generate_launch_description() -> LaunchDescription:
     """
     args = []
     args.append(
-        DeclareLaunchArgument('input_pointcloud_topic',
-                              default_value='/utlidar/cloud',
-                              description='Unitree L1 point cloud topic to subscribe to.'))
-    args.append(
-        DeclareLaunchArgument('input_odom_topic',
-                              default_value='/utlidar/robot_odom',
-                              description='Unitree odometry topic to subscribe to.'))
-    args.append(
-        DeclareLaunchArgument('output_planar_odom_topic',
-                              default_value='odom_planar',
-                              description='Topic the flattened planar odometry is published on.'))
-    args.append(
         DeclareLaunchArgument('pointcloud_frame',
                               default_value='utlidar_lidar',
                               description='Frame ID assigned to the republished Unitree L1 point cloud.'))
@@ -85,9 +73,9 @@ def generate_launch_description() -> LaunchDescription:
                       name='go2_driver',
                       output='screen',
                       parameters=[{
-                          'input_pointcloud_topic': _param('input_pointcloud_topic'),
-                          'input_odom_topic': _param('input_odom_topic'),
-                          'output_planar_odom_topic': _param('output_planar_odom_topic'),
+                          'input_pointcloud_topic': '/utlidar/cloud',
+                          'input_odom_topic': '/utlidar/robot_odom',
+                          'output_planar_odom_topic': 'odom_planar',
                           'pointcloud_frame': _param('pointcloud_frame'),
                           'odom_frame': _param('odom_frame'),
                           'base_footprint_frame': _param('base_footprint_frame'),

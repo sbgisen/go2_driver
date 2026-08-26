@@ -17,9 +17,9 @@
 
 #include <array>
 #include <cstddef>
-#include <functional>
 #include <go2_driver/go2_driver.hpp>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "builtin_interfaces/msg/time.hpp"
@@ -83,15 +83,14 @@ Go2Driver::Go2Driver(const rclcpp::NodeOptions & options) : Node("go2_driver", o
 
   pointcloud_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
     input_pointcloud_topic_, 10,
-    std::bind(&Go2Driver::publishLidar, this, std::placeholders::_1));  // NOLINT(modernize-avoid-bind)
+    [this](sensor_msgs::msg::PointCloud2::SharedPtr msg) { publishLidar(std::move(msg)); });
 
   odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
     input_odom_topic_, rclcpp::QoS(50).best_effort(),
-    std::bind(&Go2Driver::odomCallback, this, std::placeholders::_1));  // NOLINT(modernize-avoid-bind)
+    [this](nav_msgs::msg::Odometry::SharedPtr msg) { odomCallback(std::move(msg)); });
 
   low_state_sub_ = create_subscription<unitree_go::msg::LowState>(
-    "lowstate", 10,
-    std::bind(&Go2Driver::publishJointStates, this, std::placeholders::_1));  // NOLINT(modernize-avoid-bind)
+    "lowstate", 10, [this](unitree_go::msg::LowState::SharedPtr msg) { publishJointStates(std::move(msg)); });
 
   RCLCPP_INFO(get_logger(), "go2_driver state bridge started");
   RCLCPP_INFO(get_logger(), "input_pointcloud_topic: %s", input_pointcloud_topic_.c_str());

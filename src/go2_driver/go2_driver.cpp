@@ -44,6 +44,11 @@ const std::vector<std::string> g_JOINT_NAMES = {"FL_hip_joint",   "FL_thigh_join
 // each entry of g_JOINT_NAMES (URDF order) to the matching motor_state index.
 constexpr std::array<std::size_t, 12> g_MOTOR_STATE_INDEX = {3, 4, 5, 0, 1, 2, 9, 10, 11, 6, 7, 8};
 
+// The source odometry reports zero covariance, so the republished odometry
+// uses these fixed diagonals: x, y, z, roll, pitch, yaw.
+constexpr std::array<double, 6> g_POSE_COVARIANCE_DIAGONAL = {0.01, 0.01, 0.05, 0.01, 0.01, 0.01};
+constexpr std::array<double, 6> g_TWIST_COVARIANCE_DIAGONAL = {0.01, 0.01, 0.05, 0.01, 0.01, 0.01};
+
 auto makeTransform(
   const builtin_interfaces::msg::Time & stamp, const std::string & parent_frame, const std::string & child_frame,
   double x, double y, double z, const tf2::Quaternion & rotation) -> geometry_msgs::msg::TransformStamped
@@ -158,8 +163,10 @@ void Go2Driver::odomCallback(nav_msgs::msg::Odometry::SharedPtr msg)
 
     odom.twist.twist = msg->twist.twist;
 
-    odom.pose.covariance = msg->pose.covariance;
-    odom.twist.covariance = msg->twist.covariance;
+    for (std::size_t i = 0; i < 6; ++i) {
+      odom.pose.covariance[i * 7] = g_POSE_COVARIANCE_DIAGONAL[i];
+      odom.twist.covariance[i * 7] = g_TWIST_COVARIANCE_DIAGONAL[i];
+    }
 
     odom_pub_->publish(odom);
   }

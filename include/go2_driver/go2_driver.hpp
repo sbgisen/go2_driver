@@ -50,13 +50,12 @@ private:
 
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_pub_;
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_state_pub_;
-  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr planar_odom_pub_;
+  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
 
   tf2_ros::TransformBroadcaster tf_broadcaster_;
 
   std::string input_pointcloud_topic_;
   std::string input_odom_topic_;
-  std::string output_planar_odom_topic_;
   std::string pointcloud_frame_;
   std::string odom_frame_;
   std::string base_footprint_frame_;
@@ -65,7 +64,7 @@ private:
   double body_z_offset_;
   bool use_msg_stamp_;
   bool publish_tf_;
-  bool publish_planar_odom_;
+  bool publish_odom_;
 };
 
 }  // namespace go2_driver

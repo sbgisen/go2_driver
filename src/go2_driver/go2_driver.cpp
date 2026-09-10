@@ -65,7 +65,6 @@ Go2Driver::Go2Driver(const rclcpp::NodeOptions & options) : Node("go2_driver", o
 {
   input_pointcloud_topic_ = declare_parameter<std::string>("input_pointcloud_topic", "/utlidar/cloud");
   input_odom_topic_ = declare_parameter<std::string>("input_odom_topic", "/utlidar/robot_odom");
-  output_planar_odom_topic_ = declare_parameter<std::string>("output_planar_odom_topic", "odom_planar");
   pointcloud_frame_ = declare_parameter<std::string>("pointcloud_frame", "utlidar_lidar");
 
   odom_frame_ = declare_parameter<std::string>("odom_frame", "odom");
@@ -75,11 +74,11 @@ Go2Driver::Go2Driver(const rclcpp::NodeOptions & options) : Node("go2_driver", o
   body_z_offset_ = declare_parameter<double>("body_z_offset", 0.0);
   use_msg_stamp_ = declare_parameter<bool>("use_msg_stamp", false);
   publish_tf_ = declare_parameter<bool>("publish_tf", true);
-  publish_planar_odom_ = declare_parameter<bool>("publish_planar_odom", true);
+  publish_odom_ = declare_parameter<bool>("publish_odom", true);
 
   pointcloud_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>("pointcloud", 10);
   joint_state_pub_ = create_publisher<sensor_msgs::msg::JointState>("joint_states", 10);
-  planar_odom_pub_ = create_publisher<nav_msgs::msg::Odometry>(output_planar_odom_topic_, rclcpp::QoS(20));
+  odom_pub_ = create_publisher<nav_msgs::msg::Odometry>("odometry/lio", rclcpp::QoS(20));
 
   pointcloud_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
     input_pointcloud_topic_, 10,
@@ -95,7 +94,6 @@ Go2Driver::Go2Driver(const rclcpp::NodeOptions & options) : Node("go2_driver", o
   RCLCPP_INFO(get_logger(), "go2_driver state bridge started");
   RCLCPP_INFO(get_logger(), "input_pointcloud_topic: %s", input_pointcloud_topic_.c_str());
   RCLCPP_INFO(get_logger(), "input_odom_topic: %s", input_odom_topic_.c_str());
-  RCLCPP_INFO(get_logger(), "output_planar_odom_topic: %s", output_planar_odom_topic_.c_str());
   RCLCPP_INFO(get_logger(), "pointcloud_frame: %s", pointcloud_frame_.c_str());
   RCLCPP_INFO(get_logger(), "odom_frame: %s", odom_frame_.c_str());
   RCLCPP_INFO(get_logger(), "base_footprint_frame: %s", base_footprint_frame_.c_str());
@@ -149,27 +147,21 @@ void Go2Driver::odomCallback(nav_msgs::msg::Odometry::SharedPtr msg)
        makeTransform(stamp, base_footprint_frame_, base_link_frame_, 0.0, 0.0, body_z, q_rp)});
   }
 
-  if (publish_planar_odom_) {
-    nav_msgs::msg::Odometry planar;
-    planar.header.stamp = stamp;
-    planar.header.frame_id = odom_frame_;
-    planar.child_frame_id = base_footprint_frame_;
+  if (publish_odom_) {
+    nav_msgs::msg::Odometry odom;
+    odom.header.stamp = stamp;
+    odom.header.frame_id = odom_frame_;
+    odom.child_frame_id = base_link_frame_;
 
-    planar.pose.pose.position.x = p.x;
-    planar.pose.pose.position.y = p.y;
-    planar.pose.pose.position.z = 0.0;
-    planar.pose.pose.orientation = tf2::toMsg(q_yaw);
-    planar.pose.covariance = msg->pose.covariance;
+    odom.pose.pose = msg->pose.pose;
+    odom.pose.pose.position.z = body_z;
 
-    planar.twist.twist.linear.x = msg->twist.twist.linear.x;
-    planar.twist.twist.linear.y = msg->twist.twist.linear.y;
-    planar.twist.twist.linear.z = 0.0;
-    planar.twist.twist.angular.x = 0.0;
-    planar.twist.twist.angular.y = 0.0;
-    planar.twist.twist.angular.z = msg->twist.twist.angular.z;
-    planar.twist.covariance = msg->twist.covariance;
+    odom.twist.twist = msg->twist.twist;
 
-    planar_odom_pub_->publish(planar);
+    odom.pose.covariance = msg->pose.covariance;
+    odom.twist.covariance = msg->twist.covariance;
+
+    odom_pub_->publish(odom);
   }
 }
 

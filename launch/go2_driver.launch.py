@@ -64,9 +64,9 @@ def generate_launch_description() -> LaunchDescription:
                               default_value='true',
                               description='Whether to broadcast the odom -> base_link TF chain.'))
     args.append(
-        DeclareLaunchArgument('publish_planar_odom',
+        DeclareLaunchArgument('publish_odom',
                               default_value='true',
-                              description='Whether to publish the flattened planar odometry.'))
+                              description='Whether to republish the Unitree odometry.'))
 
     go2_driver = Node(package='go2_driver',
                       executable='go2_driver_node',
@@ -75,7 +75,6 @@ def generate_launch_description() -> LaunchDescription:
                       parameters=[{
                           'input_pointcloud_topic': '/utlidar/cloud',
                           'input_odom_topic': '/utlidar/robot_odom',
-                          'output_planar_odom_topic': 'odom_planar',
                           'pointcloud_frame': _param('pointcloud_frame'),
                           'odom_frame': _param('odom_frame'),
                           'base_footprint_frame': _param('base_footprint_frame'),
@@ -83,7 +82,7 @@ def generate_launch_description() -> LaunchDescription:
                           'body_z_offset': _param('body_z_offset', float),
                           'use_msg_stamp': _param('use_msg_stamp', bool),
                           'publish_tf': _param('publish_tf', bool),
-                          'publish_planar_odom': _param('publish_planar_odom', bool),
+                          'publish_odom': _param('publish_odom', bool),
                       }])
 
     return LaunchDescription(args + [

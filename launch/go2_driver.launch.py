@@ -57,7 +57,7 @@ def generate_launch_description() -> LaunchDescription:
                               description='Offset added to the base_link TF body height [m].'))
     args.append(
         DeclareLaunchArgument('use_msg_stamp',
-                              default_value='false',
+                              default_value='true',
                               description='Use the incoming message stamp instead of the current node clock.'))
     args.append(
         DeclareLaunchArgument('publish_tf',

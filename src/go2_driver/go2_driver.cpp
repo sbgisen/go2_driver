@@ -117,6 +117,11 @@ auto Go2Driver::resolveStamp(const builtin_interfaces::msg::Time & msg_stamp) co
 void Go2Driver::publishLidar(sensor_msgs::msg::PointCloud2::SharedPtr msg)
 {
   msg->header.stamp = resolveStamp(msg->header.stamp);
+  // Clamp the stamp so the cloud never leads the odom-driven TF tree, which would
+  // make lookups fail with an extrapolation-into-the-future error until the next TF.
+  if (last_tf_stamp_.nanoseconds() > 0 && rclcpp::Time(msg->header.stamp) > last_tf_stamp_) {
+    msg->header.stamp = last_tf_stamp_;
+  }
   msg->header.frame_id = pointcloud_frame_;
   pointcloud_pub_->publish(*msg);
 }
@@ -150,6 +155,7 @@ void Go2Driver::odomCallback(nav_msgs::msg::Odometry::SharedPtr msg)
     tf_broadcaster_.sendTransform(
       {makeTransform(stamp, odom_frame_, base_footprint_frame_, p.x, p.y, 0.0, q_yaw),
        makeTransform(stamp, base_footprint_frame_, base_link_frame_, 0.0, 0.0, body_z, q_rp)});
+    last_tf_stamp_ = rclcpp::Time(stamp);
   }
 
   if (publish_odom_) {

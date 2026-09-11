@@ -1,4 +1,4 @@
-# Copyright (c) 2024 Intelligent Robotics Lab (URJC)
+# Copyright (c) 2026 SoftBank Corp.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,48 +12,79 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Original work: Copyright (c) 2024 Intelligent Robotics Lab (URJC),
+# licensed under the BSD 3-Clause License. See the NOTICE file for its terms.
+
 from launch import LaunchDescription
-from launch_ros.actions import ComposableNodeContainer, Node
-from launch_ros.descriptions import ComposableNode
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
-def generate_launch_description():
+def _param(name: str, value_type: type = str) -> ParameterValue:
+    # value_type coerces the launch-argument string so the node's parameter type
+    # checks (declare_parameter<std::string> / <double> / <bool>) pass.
+    return ParameterValue(LaunchConfiguration(name), value_type=value_type)
 
-    composable_nodes = []
 
-    composable_node = ComposableNode(
-        package='go2_driver',
-        plugin='go2_driver::Go2Driver',
-        name='go2_driver',
-        namespace='',
+def generate_launch_description() -> LaunchDescription:
+    """Generate launch descriptions.
 
-    )
-    composable_nodes.append(composable_node)
+    Returns:
+        Launch descriptions
+    """
+    args = []
+    args.append(
+        DeclareLaunchArgument('pointcloud_frame',
+                              default_value='utlidar_lidar',
+                              description='Frame ID assigned to the republished Unitree L1 point cloud.'))
+    args.append(
+        DeclareLaunchArgument('odom_frame',
+                              default_value='odom',
+                              description='Parent frame of the published odometry and TF chain.'))
+    args.append(
+        DeclareLaunchArgument('base_footprint_frame',
+                              default_value='base_footprint',
+                              description='Ground-projected frame published below odom_frame.'))
+    args.append(
+        DeclareLaunchArgument('base_link_frame',
+                              default_value='base_link',
+                              description='Robot body frame published below base_footprint_frame.'))
+    args.append(
+        DeclareLaunchArgument('body_z_offset',
+                              default_value='0.0',
+                              description='Offset added to the base_link TF body height [m].'))
+    args.append(
+        DeclareLaunchArgument('use_msg_stamp',
+                              default_value='true',
+                              description='Use the incoming message stamp instead of the current node clock.'))
+    args.append(
+        DeclareLaunchArgument('publish_tf',
+                              default_value='true',
+                              description='Whether to broadcast the odom -> base_link TF chain.'))
+    args.append(
+        DeclareLaunchArgument('publish_odom',
+                              default_value='true',
+                              description='Whether to republish the Unitree odometry.'))
 
-    container = ComposableNodeContainer(
-        name='go2_container',
-        namespace='',
-        package='rclcpp_components',
-        executable='component_container',
-        composable_node_descriptions=composable_nodes,
-        output='screen',
-    )
+    go2_driver = Node(package='go2_driver',
+                      executable='go2_driver_node',
+                      name='go2_driver',
+                      output='screen',
+                      parameters=[{
+                          'input_pointcloud_topic': '/utlidar/cloud',
+                          'input_odom_topic': '/utlidar/robot_odom',
+                          'pointcloud_frame': _param('pointcloud_frame'),
+                          'odom_frame': _param('odom_frame'),
+                          'base_footprint_frame': _param('base_footprint_frame'),
+                          'base_link_frame': _param('base_link_frame'),
+                          'body_z_offset': _param('body_z_offset', float),
+                          'use_msg_stamp': _param('use_msg_stamp', bool),
+                          'publish_tf': _param('publish_tf', bool),
+                          'publish_odom': _param('publish_odom', bool),
+                      }])
 
-    pointclod_to_laserscan_cmd = Node(
-        package='pointcloud_to_laserscan',
-        executable='pointcloud_to_laserscan_node',
-        name='pointcloud_to_laserscan',
-        namespace='',
-        output='screen',
-        remappings=[('/cloud_in', '/pointcloud')],
-        parameters=[{
-                'target_frame': 'radar',
-                'transform_tolerance': 0.01,
-            }],
-    )
-
-    ld = LaunchDescription()
-    ld.add_action(container)
-    ld.add_action(pointclod_to_laserscan_cmd)
-
-    return ld
+    return LaunchDescription(args + [
+        go2_driver,
+    ])

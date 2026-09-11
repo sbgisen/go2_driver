@@ -1,462 +1,191 @@
-// BSD 3-Clause License
+// Copyright (c) 2026 SoftBank Corp.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// Original work: Copyright (c) 2024 Intelligent Robotics Lab (URJC),
+// licensed under the BSD 3-Clause License. See the NOTICE file for its terms.
 
-// Copyright (c) 2024, Intelligent Robotics Lab
-// All rights reserved.
-
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are met:
-
-// * Redistributions of source code must retain the above copyright notice, this
-//   list of conditions and the following disclaimer.
-
-// * Redistributions in binary form must reproduce the above copyright notice,
-//   this list of conditions and the following disclaimer in the documentation
-//   and/or other materials provided with the distribution.
-
-// * Neither the name of the copyright holder nor the names of its
-//   contributors may be used to endorse or promote products derived from
-//   this software without specific prior written permission.
-
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
+#include <array>
+#include <cstddef>
 #include <go2_driver/go2_driver.hpp>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "builtin_interfaces/msg/time.hpp"
+#include "geometry_msgs/msg/transform_stamped.hpp"
+#include "tf2/LinearMath/Matrix3x3.hpp"
+#include "tf2/LinearMath/Quaternion.hpp"
+#include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 
 namespace go2_driver
 {
 
-Go2Driver::Go2Driver(
-  const rclcpp::NodeOptions & options)
-: Node("go2_driver", options),
-  tf_broadcaster_(this)
+namespace
 {
-  rclcpp::QoS qos_profile(rclcpp::QoSInitialization::from_rmw(rmw_qos_profile_default));
-  qos_profile.durability(RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL);
+
+// Joint names in the order expected by the GO2 URDF: legs FL, FR, RL, RR, each
+// with hip, thigh and calf joints.
+const std::vector<std::string> g_JOINT_NAMES = {"FL_hip_joint",   "FL_thigh_joint", "FL_calf_joint",  "FR_hip_joint",
+                                                "FR_thigh_joint", "FR_calf_joint",  "RL_hip_joint",   "RL_thigh_joint",
+                                                "RL_calf_joint",  "RR_hip_joint",   "RR_thigh_joint", "RR_calf_joint"};
+
+// Unitree orders its motor_state array as legs FR, FL, RR, RL. These indices map
+// each entry of g_JOINT_NAMES (URDF order) to the matching motor_state index.
+constexpr std::array<std::size_t, 12> g_MOTOR_STATE_INDEX = {3, 4, 5, 0, 1, 2, 9, 10, 11, 6, 7, 8};
+
+// The source odometry reports zero covariance, so the republished odometry
+// uses these fixed diagonals: x, y, z, roll, pitch, yaw.
+constexpr std::array<double, 6> g_POSE_COVARIANCE_DIAGONAL = {0.01, 0.01, 0.05, 0.01, 0.01, 0.01};
+constexpr std::array<double, 6> g_TWIST_COVARIANCE_DIAGONAL = {0.01, 0.01, 0.05, 0.01, 0.01, 0.01};
+
+auto makeTransform(
+  const builtin_interfaces::msg::Time & stamp, const std::string & parent_frame, const std::string & child_frame,
+  double x, double y, double z, const tf2::Quaternion & rotation) -> geometry_msgs::msg::TransformStamped
+{
+  geometry_msgs::msg::TransformStamped tf;
+  tf.header.stamp = stamp;
+  tf.header.frame_id = parent_frame;
+  tf.child_frame_id = child_frame;
+  tf.transform.translation.x = x;
+  tf.transform.translation.y = y;
+  tf.transform.translation.z = z;
+  tf.transform.rotation = tf2::toMsg(rotation);
+  return tf;
+}
+
+}  // namespace
+
+Go2Driver::Go2Driver(const rclcpp::NodeOptions & options) : Node("go2_driver", options), tf_broadcaster_(this)
+{
+  input_pointcloud_topic_ = declare_parameter<std::string>("input_pointcloud_topic", "/utlidar/cloud");
+  input_odom_topic_ = declare_parameter<std::string>("input_odom_topic", "/utlidar/robot_odom");
+  pointcloud_frame_ = declare_parameter<std::string>("pointcloud_frame", "utlidar_lidar");
+
+  odom_frame_ = declare_parameter<std::string>("odom_frame", "odom");
+  base_footprint_frame_ = declare_parameter<std::string>("base_footprint_frame", "base_footprint");
+  base_link_frame_ = declare_parameter<std::string>("base_link_frame", "base_link");
+
+  body_z_offset_ = declare_parameter<double>("body_z_offset", 0.0);
+  use_msg_stamp_ = declare_parameter<bool>("use_msg_stamp", false);
+  publish_tf_ = declare_parameter<bool>("publish_tf", true);
+  publish_odom_ = declare_parameter<bool>("publish_odom", true);
 
   pointcloud_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>("pointcloud", 10);
   joint_state_pub_ = create_publisher<sensor_msgs::msg::JointState>("joint_states", 10);
-  odom_pub_ = create_publisher<nav_msgs::msg::Odometry>("odom", qos_profile);
-  imu_pub_ = create_publisher<unitree_go::msg::IMUState>("imu", 10);
-  request_pub_ = create_publisher<unitree_api::msg::Request>("api/sport/request", 10);
+  odom_pub_ = create_publisher<nav_msgs::msg::Odometry>("odometry/lio", rclcpp::QoS(20));
 
   pointcloud_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
-    "/utlidar/cloud", 10,
-    std::bind(&Go2Driver::publish_lidar, this, std::placeholders::_1));
+    input_pointcloud_topic_, 10,
+    [this](sensor_msgs::msg::PointCloud2::SharedPtr msg) { publishLidar(std::move(msg)); });
 
-  robot_pose_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
-    "/utlidar/robot_pose", 10,
-    std::bind(&Go2Driver::publish_pose_stamped, this, std::placeholders::_1));
-
-  joy_sub_ = create_subscription<sensor_msgs::msg::Joy>(
-    "joy", 10, std::bind(&Go2Driver::joy_callback, this, std::placeholders::_1));
+  odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
+    input_odom_topic_, rclcpp::QoS(50).best_effort(),
+    [this](nav_msgs::msg::Odometry::SharedPtr msg) { odomCallback(std::move(msg)); });
 
   low_state_sub_ = create_subscription<unitree_go::msg::LowState>(
-    "lowstate", 10,
-    std::bind(&Go2Driver::publish_joint_states, this, std::placeholders::_1));
+    "lowstate", 10, [this](unitree_go::msg::LowState::SharedPtr msg) { publishJointStates(std::move(msg)); });
 
-  cmd_vel_sub_ = create_subscription<geometry_msgs::msg::Twist>(
-    "cmd_vel", 10, std::bind(&Go2Driver::cmd_vel_callback, this, std::placeholders::_1));
-
-  set_body_height_service_ =
-    this->create_service<go2_interfaces::srv::BodyHeight>(
-    "body_height",
-    std::bind(
-      &Go2Driver::handleBodyHeight, this,
-      std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
-
-  set_continuous_gait_service_ =
-    this->create_service<go2_interfaces::srv::ContinuousGait>(
-    "continuous_gait",
-    std::bind(
-      &Go2Driver::handleContinuousGait, this,
-      std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
-
-  set_euler_service_ =
-    this->create_service<go2_interfaces::srv::Euler>(
-    "euler",
-    std::bind(
-      &Go2Driver::handleEuler, this,
-      std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
-
-  set_foot_raise_height_service_ =
-    this->create_service<go2_interfaces::srv::FootRaiseHeight>(
-    "foot_raise_height",
-    std::bind(
-      &Go2Driver::handleFootRaiseHeight, this,
-      std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
-
-  set_mode_service_ =
-    this->create_service<go2_interfaces::srv::Mode>(
-    "mode",
-    std::bind(
-      &Go2Driver::handleMode, this,
-      std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
-
-  set_pose_service_ =
-    this->create_service<go2_interfaces::srv::Pose>(
-    "pose",
-    std::bind(
-      &Go2Driver::handlePose, this,
-      std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
-
-  set_speed_level_service_ =
-    this->create_service<go2_interfaces::srv::SpeedLevel>(
-    "speed_level",
-    std::bind(
-      &Go2Driver::handleSpeedLevel, this,
-      std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
-
-  set_switch_gait_service_ =
-    this->create_service<go2_interfaces::srv::SwitchGait>(
-    "switch_gait",
-    std::bind(
-      &Go2Driver::handleSwitchGait, this,
-      std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
-
-  set_switch_joystick_service_ =
-    this->create_service<go2_interfaces::srv::SwitchJoystick>(
-    "switch_joystick",
-    std::bind(
-      &Go2Driver::handleSwitchJoystick, this,
-      std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
+  RCLCPP_INFO(get_logger(), "go2_driver state bridge started");
+  RCLCPP_INFO(get_logger(), "input_pointcloud_topic: %s", input_pointcloud_topic_.c_str());
+  RCLCPP_INFO(get_logger(), "input_odom_topic: %s", input_odom_topic_.c_str());
+  RCLCPP_INFO(get_logger(), "pointcloud_frame: %s", pointcloud_frame_.c_str());
+  RCLCPP_INFO(get_logger(), "odom_frame: %s", odom_frame_.c_str());
+  RCLCPP_INFO(get_logger(), "base_footprint_frame: %s", base_footprint_frame_.c_str());
+  RCLCPP_INFO(get_logger(), "base_link_frame: %s", base_link_frame_.c_str());
+  RCLCPP_INFO(get_logger(), "body_z_offset: %.3f", body_z_offset_);
 }
 
-void Go2Driver::publish_lidar(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
+auto Go2Driver::resolveStamp(const builtin_interfaces::msg::Time & msg_stamp) const -> builtin_interfaces::msg::Time
 {
-  msg->header.stamp = now();
-  msg->header.frame_id = "radar";
+  if (use_msg_stamp_) {
+    return msg_stamp;
+  }
+  return get_clock()->now();
+}
+
+void Go2Driver::publishLidar(sensor_msgs::msg::PointCloud2::SharedPtr msg)
+{
+  msg->header.stamp = resolveStamp(msg->header.stamp);
+  msg->header.frame_id = pointcloud_frame_;
   pointcloud_pub_->publish(*msg);
 }
 
-void Go2Driver::publish_pose_stamped(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
+void Go2Driver::odomCallback(nav_msgs::msg::Odometry::SharedPtr msg)
 {
-  geometry_msgs::msg::TransformStamped transform;
-  transform.header.stamp = now();
-  transform.header.frame_id = "odom";
-  transform.child_frame_id = "base_link";
-  transform.transform.translation.x = msg->pose.position.x;
-  transform.transform.translation.y = msg->pose.position.y;
-  transform.transform.translation.z = msg->pose.position.z + 0.07;
-  transform.transform.rotation.x = msg->pose.orientation.x;
-  transform.transform.rotation.y = msg->pose.orientation.y;
-  transform.transform.rotation.z = msg->pose.orientation.z;
-  transform.transform.rotation.w = msg->pose.orientation.w;
-  tf_broadcaster_.sendTransform(transform);
+  const builtin_interfaces::msg::Time stamp = resolveStamp(msg->header.stamp);
 
-  if (!odom_published_) {
+  const auto & p = msg->pose.pose.position;
+  const auto & q_msg = msg->pose.pose.orientation;
+
+  tf2::Quaternion q_in;
+  tf2::fromMsg(q_msg, q_in);
+
+  double roll;
+  double pitch;
+  double yaw;
+  tf2::Matrix3x3(q_in).getRPY(roll, pitch, yaw);
+
+  tf2::Quaternion q_yaw;
+  q_yaw.setRPY(0.0, 0.0, yaw);
+  q_yaw.normalize();
+
+  tf2::Quaternion q_rp;
+  q_rp.setRPY(roll, pitch, 0.0);
+  q_rp.normalize();
+
+  const double body_z = p.z + body_z_offset_;
+
+  if (publish_tf_) {
+    tf_broadcaster_.sendTransform(
+      {makeTransform(stamp, odom_frame_, base_footprint_frame_, p.x, p.y, 0.0, q_yaw),
+       makeTransform(stamp, base_footprint_frame_, base_link_frame_, 0.0, 0.0, body_z, q_rp)});
+  }
+
+  if (publish_odom_) {
     nav_msgs::msg::Odometry odom;
-    odom.header.stamp = now();
-    odom.header.frame_id = "odom";
-    odom.child_frame_id = "base_link";
-    odom.pose.pose.position.x = msg->pose.position.x;
-    odom.pose.pose.position.y = msg->pose.position.y;
-    odom.pose.pose.position.z = msg->pose.position.z + 0.07;
-    odom.pose.pose.orientation.x = msg->pose.orientation.x;
-    odom.pose.pose.orientation.y = msg->pose.orientation.y;
-    odom.pose.pose.orientation.z = msg->pose.orientation.z;
-    odom.pose.pose.orientation.w = msg->pose.orientation.w;
+    odom.header.stamp = stamp;
+    odom.header.frame_id = odom_frame_;
+    odom.child_frame_id = base_link_frame_;
+
+    odom.pose.pose = msg->pose.pose;
+    odom.pose.pose.position.z = body_z;
+
+    odom.twist.twist = msg->twist.twist;
+
+    for (std::size_t i = 0; i < 6; ++i) {
+      odom.pose.covariance[i * 7] = g_POSE_COVARIANCE_DIAGONAL[i];
+      odom.twist.covariance[i * 7] = g_TWIST_COVARIANCE_DIAGONAL[i];
+    }
+
     odom_pub_->publish(odom);
-    odom_published_ = true;
   }
 }
 
-void Go2Driver::joy_callback(const sensor_msgs::msg::Joy::SharedPtr msg)
-{
-  joy_state_ = *msg;
-}
-
-void Go2Driver::publish_joint_states(const unitree_go::msg::LowState::SharedPtr msg)
+void Go2Driver::publishJointStates(unitree_go::msg::LowState::SharedPtr msg)
 {
   sensor_msgs::msg::JointState joint_state;
+  // LowState carries no ROS header stamp (only a device tick), so use_msg_stamp_
+  // cannot apply here; always stamp with the current node clock.
   joint_state.header.stamp = now();
-  joint_state.name = {"FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
-    "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
-    "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint",
-    "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint"};
+  joint_state.name = g_JOINT_NAMES;
 
-  joint_state.position = {msg->motor_state[3].q, msg->motor_state[4].q, msg->motor_state[5].q,
-    msg->motor_state[0].q, msg->motor_state[1].q, msg->motor_state[2].q,
-    msg->motor_state[9].q, msg->motor_state[10].q, msg->motor_state[11].q,
-    msg->motor_state[6].q, msg->motor_state[7].q, msg->motor_state[8].q};
+  joint_state.position.reserve(g_MOTOR_STATE_INDEX.size());
+  for (const auto index : g_MOTOR_STATE_INDEX) {
+    joint_state.position.push_back(msg->motor_state[index].q);
+  }
 
   joint_state_pub_->publish(joint_state);
-}
-
-void Go2Driver::cmd_vel_callback(const geometry_msgs::msg::Twist::SharedPtr msg)
-{
-  nlohmann::json js;
-  js["x"] = msg->linear.x;
-  js["y"] = msg->linear.y;
-  js["z"] = msg->angular.z;
-
-  unitree_api::msg::Request req;
-  req.parameter = js.dump();
-  req.header.identity.api_id = static_cast<int>(go2_driver::Mode::Move);
-
-  request_pub_->publish(req);
-}
-
-void Go2Driver::handleBodyHeight(
-  const std::shared_ptr<rmw_request_id_t> request_header,
-  const std::shared_ptr<go2_interfaces::srv::BodyHeight::Request> request,
-  const std::shared_ptr<go2_interfaces::srv::BodyHeight::Response> response)
-{
-  (void)request_header;
-
-  if (request->height < -0.18 || request->height > 0.03) {
-    response->success = false;
-    response->message = "Height value is out of range [0.3 ~ 0.5]";
-    return;
-  }
-
-  nlohmann::json js;
-  js["data"] = request->height;
-
-  unitree_api::msg::Request req;
-  req.parameter = js.dump();
-  req.header.identity.api_id = static_cast<int>(go2_driver::Mode::BodyHeight);
-
-  request_pub_->publish(req);
-  response->success = true;
-}
-
-void Go2Driver::handleContinuousGait(
-  const std::shared_ptr<rmw_request_id_t> request_header,
-  const std::shared_ptr<go2_interfaces::srv::ContinuousGait::Request> request,
-  const std::shared_ptr<go2_interfaces::srv::ContinuousGait::Response> response)
-{
-  (void)request_header;
-
-  nlohmann::json js;
-  js["data"] = request->flag;
-
-  unitree_api::msg::Request req;
-  req.parameter = js.dump();
-  req.header.identity.api_id = static_cast<int>(go2_driver::Mode::ContinuousGait);
-
-  request_pub_->publish(req);
-  response->success = true;
-}
-
-void Go2Driver::handleEuler(
-  const std::shared_ptr<rmw_request_id_t> request_header,
-  const std::shared_ptr<go2_interfaces::srv::Euler::Request> request,
-  const std::shared_ptr<go2_interfaces::srv::Euler::Response> response)
-{
-  (void)request_header;
-
-  nlohmann::json js;
-  if (request->roll < -0.75 || request->roll > 0.75) {
-    response->success = false;
-    response->message = "Roll value is out of range [-0.75 ~ 0.75]";
-    return;
-  } else if (request->pitch < -0.75 || request->pitch > 0.75) {
-    response->success = false;
-    response->message = "Pitch value is out of range [-0.75 ~ 0.75]";
-    return;
-  } else if (request->yaw < -0.6 || request->yaw > 0.6) {
-    response->success = false;
-    response->message = "Yaw value is out of range [-1.5 ~ 1.5]";
-    return;
-  }
-
-  js["x"] = request->roll;
-  js["y"] = request->pitch;
-  js["z"] = request->yaw;
-
-  unitree_api::msg::Request req;
-  req.parameter = js.dump();
-  req.header.identity.api_id = static_cast<int>(go2_driver::Mode::Euler);
-
-  request_pub_->publish(req);
-  response->success = true;
-}
-
-void Go2Driver::handleFootRaiseHeight(
-  const std::shared_ptr<rmw_request_id_t> request_header,
-  const std::shared_ptr<go2_interfaces::srv::FootRaiseHeight::Request> request,
-  const std::shared_ptr<go2_interfaces::srv::FootRaiseHeight::Response> response)
-{
-  (void)request_header;
-
-  if (request->height < 0 || request->height > 0.1) {
-    response->success = false;
-    response->message = "Height value is out of range [-0.06 ~ 0.03]";
-    return;
-  }
-
-  nlohmann::json js;
-  js["data"] = request->height;
-
-  unitree_api::msg::Request req;
-  req.parameter = js.dump();
-  req.header.identity.api_id = static_cast<int>(go2_driver::Mode::FootRaiseHeight);
-
-  request_pub_->publish(req);
-  response->success = true;
-}
-
-void Go2Driver::handleMode(
-  const std::shared_ptr<rmw_request_id_t> request_header,
-  const std::shared_ptr<go2_interfaces::srv::Mode::Request> request,
-  const std::shared_ptr<go2_interfaces::srv::Mode::Response> response)
-{
-  (void)request_header;
-  std::string mode = request->mode;
-
-  unitree_api::msg::Request req;
-
-  if (mode == "damp") {
-    response->message = "Change the mode to Damp";
-    req.header.identity.api_id = static_cast<int>(go2_driver::Mode::Damp);
-  } else if (mode == "balance_stand") {
-    response->message = "Change the mode to BalanceStand";
-    req.header.identity.api_id = static_cast<int>(go2_driver::Mode::BalanceStand);
-  } else if (mode == "stop_move") {
-    response->message = "Change the mode to StopMove";
-    req.header.identity.api_id = static_cast<int>(go2_driver::Mode::StopMove);
-  } else if (mode == "stand_up") {
-    response->message = "Change the mode to StandUp";
-    req.header.identity.api_id = static_cast<int>(go2_driver::Mode::StandUp);
-  } else if (mode == "stand_down") {
-    response->message = "Change the mode to StandDown";
-    req.header.identity.api_id = static_cast<int>(go2_driver::Mode::StandDown);
-  } else if (mode == "sit") {
-    response->message = "Change the mode to Sit";
-    req.header.identity.api_id = static_cast<int>(go2_driver::Mode::Sit);
-  } else if (mode == "rise_sit") {
-    response->message = "Change the mode to RiseSit";
-    req.header.identity.api_id = static_cast<int>(go2_driver::Mode::RiseSit);
-  } else if (mode == "hello") {
-    response->message = "Change the mode to Hello. Say hello to your robot!";
-    req.header.identity.api_id = static_cast<int>(go2_driver::Mode::Hello);
-  } else if (mode == "stretch") {
-    response->message = "Change the mode to Stretch";
-    req.header.identity.api_id = static_cast<int>(go2_driver::Mode::Stretch);
-  } else if (mode == "wallow") {
-    response->message = "Change the mode to Wallow";
-    req.header.identity.api_id = static_cast<int>(go2_driver::Mode::Wallow);
-  } else if (mode == "scrape") {
-    response->message = "Change the mode to Scrape";
-    req.header.identity.api_id = static_cast<int>(go2_driver::Mode::Scrape);
-  } else if (mode == "front_flip") {
-    response->message = "Front flip??? Really? You want to break your robot? Crazy!";
-    // req.header.identity.api_id = static_cast<int>(go2_driver::Mode::FrontFlip);
-  } else if (mode == "front_jump") {
-    response->message = "Change the mode to Front Jump";
-    req.header.identity.api_id = static_cast<int>(go2_driver::Mode::FrontJump);
-  } else if (mode == "front_pounce") {
-    response->message = "Change the mode to Front Pounce";
-    req.header.identity.api_id = static_cast<int>(go2_driver::Mode::FrontPounce);
-  } else if (mode == "dance1") {
-    response->message = "Change the mode to Dance 1. Let's dance!";
-    req.header.identity.api_id = static_cast<int>(go2_driver::Mode::Dance1);
-  } else if (mode == "dance2") {
-    response->message = "Change the mode to Dance 2. Let's dance!";
-    req.header.identity.api_id = static_cast<int>(go2_driver::Mode::Dance2);
-  } else if (mode == "finger_heart") {
-    response->message = "Change the mode to Finger Heart";
-    req.header.identity.api_id = static_cast<int>(go2_driver::Mode::FingerHeart);
-  } else {
-    response->success = false;
-    response->message = "Invalid mode";
-    return;
-  }
-
-  request_pub_->publish(req);
-  response->success = true;
-}
-
-void Go2Driver::handlePose(
-  const std::shared_ptr<rmw_request_id_t> request_header,
-  const std::shared_ptr<go2_interfaces::srv::Pose::Request> request,
-  const std::shared_ptr<go2_interfaces::srv::Pose::Response> response)
-{
-  (void)request_header;
-
-  nlohmann::json js;
-  js["data"] = request->flag;
-
-  unitree_api::msg::Request req;
-  req.parameter = js.dump();
-  req.header.identity.api_id = static_cast<int>(go2_driver::Mode::Pose);
-
-  request_pub_->publish(req);
-  response->success = true;
-}
-
-void Go2Driver::handleSpeedLevel(
-  const std::shared_ptr<rmw_request_id_t> request_header,
-  const std::shared_ptr<go2_interfaces::srv::SpeedLevel::Request> request,
-  const std::shared_ptr<go2_interfaces::srv::SpeedLevel::Response> response)
-{
-  (void)request_header;
-
-  if (request->level < -1 || request->level > 1) {
-    response->success = false;
-    response->message = "Speed level is out of range [-1 ~ 1]";
-    return;
-  }
-
-  nlohmann::json js;
-  js["data"] = request->level;
-
-  unitree_api::msg::Request req;
-  req.parameter = js.dump();
-  req.header.identity.api_id = static_cast<int>(go2_driver::Mode::SpeedLevel);
-
-  request_pub_->publish(req);
-  response->success = true;
-}
-
-void Go2Driver::handleSwitchGait(
-  const std::shared_ptr<rmw_request_id_t> request_header,
-  const std::shared_ptr<go2_interfaces::srv::SwitchGait::Request> request,
-  const std::shared_ptr<go2_interfaces::srv::SwitchGait::Response> response)
-{
-  (void)request_header;
-
-  if (request->d < 0 || request->d > 4) {
-    response->success = false;
-    response->message = "Invalid gait type [0 - 4]";
-    return;
-  }
-
-  nlohmann::json js;
-  js["data"] = request->d;
-
-  unitree_api::msg::Request req;
-  req.parameter = js.dump();
-  req.header.identity.api_id = static_cast<int>(go2_driver::Mode::SwitchGait);
-
-  request_pub_->publish(req);
-  response->success = true;
-}
-
-void Go2Driver::handleSwitchJoystick(
-  const std::shared_ptr<rmw_request_id_t> request_header,
-  const std::shared_ptr<go2_interfaces::srv::SwitchJoystick::Request> request,
-  const std::shared_ptr<go2_interfaces::srv::SwitchJoystick::Response> response)
-{
-  (void)request_header;
-
-  nlohmann::json js;
-  js["data"] = request->flag;
-
-  unitree_api::msg::Request req;
-  req.parameter = js.dump();
-  req.header.identity.api_id = static_cast<int>(go2_driver::Mode::SwitchJoystick);
-
-  request_pub_->publish(req);
-  response->success = true;
 }
 
 }  // namespace go2_driver

@@ -5,7 +5,7 @@ firmware DDS interface and a standard ROS 2 / Nav2 stack:
 
 | Component | Executable | Direction | Responsibility |
 |---|---|---|---|
-| `go2_driver::Go2Driver` | `go2_driver_node` | robot &rarr; ROS | Joint states, point cloud, dynamic TF, planar odometry |
+| `go2_driver::Go2Driver` | `go2_driver_node` | robot &rarr; ROS | Joint states, point cloud, dynamic TF, odometry |
 | `go2_driver::Go2SportBridge` | `go2_sport_bridge_node` | ROS &rarr; robot | `cmd_vel` and mode services translated to Sport API requests |
 
 Both are `rclcpp_components` plugins in a single shared library, so they can be
@@ -54,7 +54,7 @@ this launch file, or write your own launch file that starts only
 | Subscriber | `lowstate` | `unitree_go/msg/LowState` | |
 | Publisher | `pointcloud` | `sensor_msgs/msg/PointCloud2` | Input cloud with `frame_id` and stamp normalised |
 | Publisher | `joint_states` | `sensor_msgs/msg/JointState` | Motor states remapped to URDF joint order |
-| Publisher | `odom_planar` | `nav_msgs/msg/Odometry` | Renamed by `output_planar_odom_topic` |
+| Publisher | `odometry/lio` | `nav_msgs/msg/Odometry` | Unitree odometry republished with `child_frame_id` = `base_link` |
 | TF | `odom` &rarr; `base_footprint` | | x / y / yaw only |
 | TF | `base_footprint` &rarr; `base_link` | | z / roll / pitch only |
 
@@ -62,8 +62,9 @@ The TF chain is split so that `base_footprint` stays a ground-projected frame
 while `base_link` follows the body height, which changes as the robot lies
 down, stands and walks.
 
-`odom_planar` is the flattened odometry Nav2 consumes: the same pose with roll,
-pitch and z removed.
+`odometry/lio` is the Unitree odometry republished as-is in the `odom` frame,
+with `body_z_offset` applied to z and the covariance the firmware leaves at zero
+filled in.
 
 ### Parameters
 
@@ -71,7 +72,6 @@ pitch and z removed.
 |---|---|---|---|
 | `input_pointcloud_topic` | string | `/utlidar/cloud` | Unitree L1 point cloud topic |
 | `input_odom_topic` | string | `/utlidar/robot_odom` | Unitree odometry topic |
-| `output_planar_odom_topic` | string | `odom_planar` | Flattened odometry topic |
 | `pointcloud_frame` | string | `utlidar_lidar` | `frame_id` written onto the republished cloud |
 | `odom_frame` | string | `odom` | Parent of the published TF chain |
 | `base_footprint_frame` | string | `base_footprint` | Ground-projected frame |
@@ -79,12 +79,12 @@ pitch and z removed.
 | `body_z_offset` | double | `0.0` | Offset added to the `base_link` body height [m] |
 | `use_msg_stamp` | bool | `false` | Stamp output with the input stamp instead of the node clock |
 | `publish_tf` | bool | `true` | Broadcast the TF chain |
-| `publish_planar_odom` | bool | `true` | Publish the flattened odometry |
+| `publish_odom` | bool | `true` | Republish the Unitree odometry |
 
 `pointcloud_frame` must name a frame that actually exists in the URDF, since
 this node only relabels the cloud — it does not publish that frame itself.
 
-`publish_tf` and `publish_planar_odom` exist so the driver can coexist with
+`publish_tf` and `publish_odom` exist so the driver can coexist with
 another producer of the same frames or topic. Leaving both enabled while a
 second node publishes the same child frame gives two publishers on `/tf`, which
 makes the transform jitter between the two sources.

@@ -16,7 +16,9 @@
 
 #include <algorithm>
 #include <chrono>
-#include <thread>
+#include <functional>
+#include <set>
+#include <string>
 #include <utility>
 
 #include "go2_driver/sport_api_id.hpp"
@@ -27,11 +29,35 @@ namespace go2_driver
 namespace
 {
 
+// Refused rather than sent: these invert the robot.
+const std::set<std::string> g_BLOCKED_MODES{"front_flip", "back_flip", "left_flip", "hand_stand"};
+
 // The Sport API SpeedLevel command takes -1 or 1, not the whole [-1, 1] range:
-// the firmware answers 0 with status.code = -1 (measured on the robot, 6/6).
+// the firmware answers 0 with status.code = -1 (measured on the robot, 6/6 on
+// 2026-08-05 and again 3/3 on 2026-08-26).
 // Neither unitree_sdk2 nor unitree_ros2 documents or range-checks this.
 constexpr int32_t g_SPEED_LEVEL_LOW = -1;
 constexpr int32_t g_SPEED_LEVEL_HIGH = 1;
+
+// Seconds the robot is given to acknowledge a Sport API request.
+constexpr double g_DEFAULT_RESPONSE_TIMEOUT = 2.0;
+
+constexpr int g_QOS_DEPTH = 10;
+
+// rclcpp picks the deferred callback by signature: no response argument means
+// rclcpp does not answer the caller when the handler returns.
+using ModeCallback =
+  std::function<void(std::shared_ptr<rmw_request_id_t>, go2_interfaces::srv::Mode::Request::SharedPtr)>;
+using SpeedLevelCallback =
+  std::function<void(std::shared_ptr<rmw_request_id_t>, go2_interfaces::srv::SpeedLevel::Request::SharedPtr)>;
+using SwitchJoystickCallback =
+  std::function<void(std::shared_ptr<rmw_request_id_t>, go2_interfaces::srv::SwitchJoystick::Request::SharedPtr)>;
+using EulerCallback =
+  std::function<void(std::shared_ptr<rmw_request_id_t>, go2_interfaces::srv::Euler::Request::SharedPtr)>;
+using PoseCallback =
+  std::function<void(std::shared_ptr<rmw_request_id_t>, go2_interfaces::srv::Pose::Request::SharedPtr)>;
+using GetAutoRecoveryCallback =
+  std::function<void(std::shared_ptr<rmw_request_id_t>, go2_interfaces::srv::GetAutoRecovery::Request::SharedPtr)>;
 
 auto emptyJson() -> nlohmann::json { return nlohmann::json::object(); }
 
@@ -62,7 +88,8 @@ auto availableModes(const std::unordered_map<std::string, std::vector<SportComma
   return joined;
 }
 
-auto moveJson(double x, double y, double z) -> nlohmann::json
+// Both Move and Euler take their three values under x / y / z.
+auto xyzJson(double x, double y, double z) -> nlohmann::json
 {
   nlohmann::json js;
   js["x"] = x;
@@ -76,41 +103,81 @@ auto step(SportApiId id, nlohmann::json parameter = emptyJson(), int wait_ms_aft
   return SportCommandStep{static_cast<int32_t>(id), std::move(parameter), wait_ms_after};
 }
 
+auto describe(int32_t api_id, const ApiResult & result, bool waited) -> std::string
+{
+  const auto prefix = "api_id=" + std::to_string(api_id);
+  if (!waited) {
+    // Nothing was checked, so do not imply the robot agreed.
+    return prefix + " published";
+  }
+  if (result.ok_) {
+    return prefix + " accepted";
+  }
+  if (result.status_code_ < 0) {
+    return prefix + " got no reply";
+  }
+  return prefix + " rejected with status " + std::to_string(result.status_code_);
+}
+
 }  // namespace
 
 Go2SportBridge::Go2SportBridge(const rclcpp::NodeOptions & options) : Node("go2_sport_bridge", options)
 {
   initPresets();
 
-  request_pub_ = create_publisher<unitree_api::msg::Request>("api/sport/request", 10);
+  wait_for_response_ = declare_parameter<bool>("wait_for_response", true);
+  const auto timeout = declare_parameter<double>("response_timeout", g_DEFAULT_RESPONSE_TIMEOUT);
+
+  api_client_ = std::make_unique<UnitreeApiClient>(
+    this, "api/sport/request", "api/sport/response", std::chrono::milliseconds(static_cast<int64_t>(timeout * 1000.0)));
 
   cmd_vel_sub_ = create_subscription<geometry_msgs::msg::Twist>(
-    "cmd_vel", 10, [this](geometry_msgs::msg::Twist::SharedPtr msg) { cmdVelCallback(std::move(msg)); });
+    "cmd_vel", g_QOS_DEPTH, [this](geometry_msgs::msg::Twist::SharedPtr msg) { cmdVelCallback(std::move(msg)); });
 
   mode_service_ = create_service<go2_interfaces::srv::Mode>(
-    "mode", [this](
-              std::shared_ptr<rmw_request_id_t> header, std::shared_ptr<go2_interfaces::srv::Mode::Request> request,
-              std::shared_ptr<go2_interfaces::srv::Mode::Response> response) {
-      handleMode(std::move(header), std::move(request), std::move(response));
-    });
+    "mode",
+    ModeCallback([this](std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::Mode::Request::SharedPtr req) {
+      handleMode(std::move(header), std::move(req));
+    }));
 
   speed_level_service_ = create_service<go2_interfaces::srv::SpeedLevel>(
     "speed_level",
-    [this](
-      std::shared_ptr<rmw_request_id_t> header, std::shared_ptr<go2_interfaces::srv::SpeedLevel::Request> request,
-      std::shared_ptr<go2_interfaces::srv::SpeedLevel::Response> response) {
-      handleSpeedLevel(std::move(header), std::move(request), std::move(response));
-    });
+    SpeedLevelCallback(
+      [this](std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::SpeedLevel::Request::SharedPtr req) {
+        handleSpeedLevel(std::move(header), std::move(req));
+      }));
 
   switch_joystick_service_ = create_service<go2_interfaces::srv::SwitchJoystick>(
     "switch_joystick",
-    [this](
-      std::shared_ptr<rmw_request_id_t> header, std::shared_ptr<go2_interfaces::srv::SwitchJoystick::Request> request,
-      std::shared_ptr<go2_interfaces::srv::SwitchJoystick::Response> response) {
-      handleSwitchJoystick(std::move(header), std::move(request), std::move(response));
-    });
+    SwitchJoystickCallback(
+      [this](std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::SwitchJoystick::Request::SharedPtr req) {
+        handleSwitchJoystick(std::move(header), std::move(req));
+      }));
+
+  euler_service_ = create_service<go2_interfaces::srv::Euler>(
+    "euler",
+    EulerCallback([this](std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::Euler::Request::SharedPtr req) {
+      handleEuler(std::move(header), std::move(req));
+    }));
+
+  pose_service_ = create_service<go2_interfaces::srv::Pose>(
+    "pose",
+    PoseCallback([this](std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::Pose::Request::SharedPtr req) {
+      handlePose(std::move(header), std::move(req));
+    }));
+
+  get_auto_recovery_service_ = create_service<go2_interfaces::srv::GetAutoRecovery>(
+    "get_auto_recovery",
+    GetAutoRecoveryCallback(
+      [this](std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::GetAutoRecovery::Request::SharedPtr req) {
+        handleGetAutoRecovery(std::move(header), std::move(req));
+      }));
 
   RCLCPP_INFO(get_logger(), "go2_sport_bridge started");
+  RCLCPP_INFO(
+    get_logger(), "wait_for_response: %s",
+    wait_for_response_ ? "true (services report the status code the robot replied with)"
+                       : "false (services report only that the request was published)");
 }
 
 void Go2SportBridge::initPresets()
@@ -128,6 +195,8 @@ void Go2SportBridge::initPresets()
     {"rise_sit", {step(SportApiId::RISE_SIT)}},
     {"hello", {step(SportApiId::HELLO)}},
     {"stretch", {step(SportApiId::STRETCH)}},
+    {"content", {step(SportApiId::CONTENT)}},
+    {"scrape", {step(SportApiId::SCRAPE)}},
     {"dance1", {step(SportApiId::DANCE1)}},
     {"dance2", {step(SportApiId::DANCE2)}},
     {"finger_heart", {step(SportApiId::FINGER_HEART)}},
@@ -151,6 +220,9 @@ void Go2SportBridge::initPresets()
     {"auto_recovery_set", {step(SportApiId::AUTO_RECOVERY_SET, dataJson(true))}},
 
     // WARNING: acrobatic moves. Run only with clear space and a safe surface.
+    {"front_flip", {step(SportApiId::FRONT_FLIP)}},
+    {"front_jump", {step(SportApiId::FRONT_JUMP)}},
+    {"front_pounce", {step(SportApiId::FRONT_POUNCE)}},
     {"left_flip", {step(SportApiId::LEFT_FLIP)}},
     {"back_flip", {step(SportApiId::BACK_FLIP)}},
     {"hand_stand", {step(SportApiId::HAND_STAND, dataJson(true))}},
@@ -164,87 +236,268 @@ void Go2SportBridge::initPresets()
   };
 }
 
-auto Go2SportBridge::publishRequest(int32_t api_id, const nlohmann::json & parameter) -> std::string
+auto Go2SportBridge::sendRequest(int32_t api_id, const nlohmann::json & parameter, ApiResponseCallback on_result)
+  -> bool
 {
-  unitree_api::msg::Request req;
-  req.header.identity.api_id = api_id;
-  req.parameter = parameter.dump();
+  if (wait_for_response_) {
+    return api_client_->call(api_id, parameter, std::move(on_result));
+  }
 
-  request_pub_->publish(req);
-
-  return "published api_id=" + std::to_string(api_id) + ", parameter=" + req.parameter;
+  api_client_->send(api_id, parameter);
+  on_result(ApiResult{true, 0, ""});
+  return true;
 }
 
-auto Go2SportBridge::executeSequence(const std::vector<SportCommandStep> & steps, std::string & message) -> bool
+void Go2SportBridge::startSequence(
+  const rmw_request_id_t & request_id, const std::string & name, const std::vector<SportCommandStep> & steps)
 {
   if (steps.empty()) {
-    message = "sequence is empty";
-    return false;
+    auto id = request_id;
+    go2_interfaces::srv::Mode::Response response;
+    response.success = false;
+    response.message = "mode " + name + ": the preset has no steps";
+    mode_service_->send_response(id, response);
+    return;
   }
 
-  std::string last_message;
+  active_sequence_ = SequenceRun{name, steps, 0, request_id, "", true};
+  advanceSequence();
+}
 
-  for (const auto & s : steps) {
-    last_message = publishRequest(s.api_id_, s.parameter_);
+void Go2SportBridge::advanceSequence()
+{
+  auto & run = *active_sequence_;
 
-    if (s.wait_ms_after_ > 0) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(s.wait_ms_after_));
-    }
+  if (run.index_ >= run.steps_.size()) {
+    finishSequence();
+    return;
   }
 
-  message = "sequence completed: " + last_message;
-  return true;
+  const auto api_id = run.steps_[run.index_].api_id_;
+  const auto sent =
+    sendRequest(api_id, run.steps_[run.index_].parameter_, [this](const ApiResult & result) { onStepResult(result); });
+
+  if (!sent) {
+    run.ok_ = false;
+    run.last_message_ = "api_id=" + std::to_string(api_id) + " could not be sent";
+    finishSequence();
+  }
+}
+
+void Go2SportBridge::onStepResult(const ApiResult & result)
+{
+  auto & run = *active_sequence_;
+
+  const auto wait = std::chrono::milliseconds(run.steps_[run.index_].wait_ms_after_);
+  run.ok_ = run.ok_ && result.ok_;
+  run.last_message_ = describe(run.steps_[run.index_].api_id_, result, wait_for_response_);
+  ++run.index_;
+
+  // Later steps assume the earlier ones took effect.
+  if (!result.ok_) {
+    finishSequence();
+    return;
+  }
+
+  // Via the timer even for a zero wait.
+  sequence_timer_ = create_wall_timer(wait, [this] {
+    sequence_timer_->cancel();
+    advanceSequence();
+  });
+}
+
+void Go2SportBridge::finishSequence()
+{
+  auto run = std::move(*active_sequence_);
+  active_sequence_.reset();
+  sequence_timer_.reset();
+
+  go2_interfaces::srv::Mode::Response response;
+  response.success = run.ok_;
+  response.message = "mode " + run.name_ + ": " + run.last_message_;
+
+  mode_service_->send_response(run.request_id_, response);
 }
 
 void Go2SportBridge::cmdVelCallback(geometry_msgs::msg::Twist::SharedPtr msg)
 {
-  const auto js = moveJson(msg->linear.x, msg->linear.y, msg->angular.z);
-
-  static_cast<void>(publishRequest(static_cast<int32_t>(SportApiId::MOVE), js));
+  // noreply: at cmd_vel rates the replies would only be discarded.
+  api_client_->send(
+    static_cast<int32_t>(SportApiId::MOVE), xyzJson(msg->linear.x, msg->linear.y, msg->angular.z), true);
 }
 
 void Go2SportBridge::handleMode(
-  std::shared_ptr<rmw_request_id_t> header, std::shared_ptr<go2_interfaces::srv::Mode::Request> request,
-  std::shared_ptr<go2_interfaces::srv::Mode::Response> response)
+  std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::Mode::Request::SharedPtr request)
 {
-  (void)header;
+  go2_interfaces::srv::Mode::Response response;
+  response.success = false;
 
   const auto it = presets_.find(request->mode);
   if (it == presets_.end()) {
-    response->success = false;
-    response->message = "invalid mode: " + request->mode + ". available: " + availableModes(presets_);
+    response.message = "invalid mode: " + request->mode + ". available: " + availableModes(presets_);
+    mode_service_->send_response(*header, response);
     return;
   }
 
-  response->success = executeSequence(it->second, response->message);
+  if (g_BLOCKED_MODES.count(request->mode) != 0) {
+    response.message = request->mode +
+                       " is disabled: it inverts the robot and would destroy a payload. "
+                       "Send the Sport API id directly on api/sport/request if you really mean it.";
+    mode_service_->send_response(*header, response);
+    return;
+  }
+
+  if (active_sequence_.has_value()) {
+    response.message = "another mode sequence is in progress: " + active_sequence_->name_;
+    mode_service_->send_response(*header, response);
+    return;
+  }
+
+  startSequence(*header, request->mode, it->second);
 }
 
 void Go2SportBridge::handleSpeedLevel(
-  std::shared_ptr<rmw_request_id_t> header, std::shared_ptr<go2_interfaces::srv::SpeedLevel::Request> request,
-  std::shared_ptr<go2_interfaces::srv::SpeedLevel::Response> response)
+  std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::SpeedLevel::Request::SharedPtr request)
 {
-  (void)header;
+  // send_response takes the id by non-const reference.
+  auto request_id = *header;
+  const auto api_id = static_cast<int32_t>(SportApiId::SPEED_LEVEL);
 
   if (request->level != g_SPEED_LEVEL_LOW && request->level != g_SPEED_LEVEL_HIGH) {
-    response->success = false;
-    response->message = "level must be " + std::to_string(g_SPEED_LEVEL_LOW) + " or " +
-                        std::to_string(g_SPEED_LEVEL_HIGH) + ", got " + std::to_string(request->level);
+    go2_interfaces::srv::SpeedLevel::Response response;
+    response.success = false;
+    response.message = "level must be " + std::to_string(g_SPEED_LEVEL_LOW) + " or " +
+                       std::to_string(g_SPEED_LEVEL_HIGH) + ", got " + std::to_string(request->level);
+    speed_level_service_->send_response(request_id, response);
     return;
   }
 
-  response->message = publishRequest(static_cast<int32_t>(SportApiId::SPEED_LEVEL), dataJson(request->level));
-  response->success = true;
+  const auto sent = sendRequest(api_id, dataJson(request->level), [this, request_id](const ApiResult & result) mutable {
+    go2_interfaces::srv::SpeedLevel::Response response;
+    response.success = result.ok_;
+    response.message = describe(api_id, result, wait_for_response_);
+    speed_level_service_->send_response(request_id, response);
+  });
+
+  if (!sent) {
+    go2_interfaces::srv::SpeedLevel::Response response;
+    response.success = false;
+    response.message = "api_id=" + std::to_string(api_id) + " could not be sent";
+    speed_level_service_->send_response(request_id, response);
+  }
 }
 
 void Go2SportBridge::handleSwitchJoystick(
-  std::shared_ptr<rmw_request_id_t> header, std::shared_ptr<go2_interfaces::srv::SwitchJoystick::Request> request,
-  std::shared_ptr<go2_interfaces::srv::SwitchJoystick::Response> response)
+  std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::SwitchJoystick::Request::SharedPtr request)
 {
-  (void)header;
+  auto request_id = *header;
+  const auto api_id = static_cast<int32_t>(SportApiId::SWITCH_JOYSTICK);
 
-  // go2_interfaces/SwitchJoystick has no message field, so discard the description.
-  static_cast<void>(publishRequest(static_cast<int32_t>(SportApiId::SWITCH_JOYSTICK), dataJson(request->flag)));
-  response->success = true;
+  const auto sent = sendRequest(api_id, dataJson(request->flag), [this, request_id](const ApiResult & result) mutable {
+    if (!result.ok_) {
+      // SwitchJoystick carries no message field.
+      RCLCPP_WARN(get_logger(), "switch_joystick failed: %s", describe(api_id, result, wait_for_response_).c_str());
+    }
+
+    go2_interfaces::srv::SwitchJoystick::Response response;
+    response.success = result.ok_;
+    switch_joystick_service_->send_response(request_id, response);
+  });
+
+  if (!sent) {
+    go2_interfaces::srv::SwitchJoystick::Response response;
+    response.success = false;
+    switch_joystick_service_->send_response(request_id, response);
+  }
+}
+
+void Go2SportBridge::handleEuler(
+  std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::Euler::Request::SharedPtr request)
+{
+  auto request_id = *header;
+  const auto api_id = static_cast<int32_t>(SportApiId::EULER);
+
+  const auto sent = sendRequest(
+    api_id, xyzJson(request->roll, request->pitch, request->yaw), [this, request_id](const ApiResult & result) mutable {
+      go2_interfaces::srv::Euler::Response response;
+      response.success = result.ok_;
+      response.message = describe(api_id, result, wait_for_response_);
+      euler_service_->send_response(request_id, response);
+    });
+
+  if (!sent) {
+    go2_interfaces::srv::Euler::Response response;
+    response.success = false;
+    response.message = "api_id=" + std::to_string(api_id) + " could not be sent";
+    euler_service_->send_response(request_id, response);
+  }
+}
+
+void Go2SportBridge::handlePose(
+  std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::Pose::Request::SharedPtr request)
+{
+  auto request_id = *header;
+  const auto api_id = static_cast<int32_t>(SportApiId::POSE);
+
+  const auto sent = sendRequest(api_id, dataJson(request->flag), [this, request_id](const ApiResult & result) mutable {
+    if (!result.ok_) {
+      // Pose carries no message field.
+      RCLCPP_WARN(get_logger(), "pose failed: %s", describe(api_id, result, wait_for_response_).c_str());
+    }
+
+    go2_interfaces::srv::Pose::Response response;
+    response.success = result.ok_;
+    pose_service_->send_response(request_id, response);
+  });
+
+  if (!sent) {
+    go2_interfaces::srv::Pose::Response response;
+    response.success = false;
+    pose_service_->send_response(request_id, response);
+  }
+}
+
+void Go2SportBridge::handleGetAutoRecovery(
+  std::shared_ptr<rmw_request_id_t> header, go2_interfaces::srv::GetAutoRecovery::Request::SharedPtr request)
+{
+  (void)request;
+
+  auto request_id = *header;
+  const auto api_id = static_cast<int32_t>(SportApiId::AUTO_RECOVERY_GET);
+
+  go2_interfaces::srv::GetAutoRecovery::Response failure;
+  failure.success = false;
+
+  if (!wait_for_response_) {
+    // The answer is the reply itself, so there is nothing to report without it.
+    failure.message = "get_auto_recovery needs wait_for_response to be enabled";
+    get_auto_recovery_service_->send_response(request_id, failure);
+    return;
+  }
+
+  const auto sent = sendRequest(api_id, emptyJson(), [this, request_id](const ApiResult & result) mutable {
+    go2_interfaces::srv::GetAutoRecovery::Response response;
+    response.success = result.ok_;
+    response.message = describe(api_id, result, true);
+
+    if (result.ok_) {
+      // The robot answers {"data": <bool>}.
+      const auto parsed = nlohmann::json::parse(result.data_, nullptr, false);
+      if (parsed.is_discarded() || !parsed.contains("data") || !parsed["data"].is_boolean()) {
+        response.success = false;
+        response.message = "could not read a flag out of the reply: " + result.data_;
+      } else {
+        response.enable = parsed["data"].get<bool>();
+      }
+    }
+
+    get_auto_recovery_service_->send_response(request_id, response);
+  });
+
+  if (!sent) {
+    failure.message = "api_id=" + std::to_string(api_id) + " could not be sent";
+    get_auto_recovery_service_->send_response(request_id, failure);
+  }
 }
 
 }  // namespace go2_driver

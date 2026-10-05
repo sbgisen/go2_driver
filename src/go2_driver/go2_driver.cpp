@@ -49,6 +49,10 @@ constexpr std::array<std::size_t, 12> g_MOTOR_STATE_INDEX = {3, 4, 5, 0, 1, 2, 9
 constexpr std::array<double, 6> g_POSE_COVARIANCE_DIAGONAL = {0.01, 0.01, 0.05, 0.01, 0.01, 0.01};
 constexpr std::array<double, 6> g_TWIST_COVARIANCE_DIAGONAL = {0.01, 0.01, 0.05, 0.01, 0.01, 0.01};
 
+// A cloud leading the last TF by more than this (several odom periods at ~150 Hz)
+// means the odom feeding the TF has most likely stalled; warn instead of clamping silently.
+constexpr double g_STALE_TF_WARN_SEC = 0.1;
+
 auto makeTransform(
   const builtin_interfaces::msg::Time & stamp, const std::string & parent_frame, const std::string & child_frame,
   double x, double y, double z, const tf2::Quaternion & rotation) -> geometry_msgs::msg::TransformStamped
@@ -120,6 +124,12 @@ void Go2Driver::publishLidar(sensor_msgs::msg::PointCloud2::SharedPtr msg)
   // Clamp the stamp so the cloud never leads the odom-driven TF tree, which would
   // make lookups fail with an extrapolation-into-the-future error until the next TF.
   if (last_tf_stamp_.nanoseconds() > 0 && rclcpp::Time(msg->header.stamp) > last_tf_stamp_) {
+    const double lead_sec = (rclcpp::Time(msg->header.stamp) - last_tf_stamp_).seconds();
+    if (lead_sec > g_STALE_TF_WARN_SEC) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 5000, "Cloud stamp leads the last TF by %.3f s; check that %s is still published",
+        lead_sec, input_odom_topic_.c_str());
+    }
     msg->header.stamp = last_tf_stamp_;
   }
   msg->header.frame_id = pointcloud_frame_;

@@ -77,7 +77,7 @@ Go2Driver::Go2Driver(const rclcpp::NodeOptions & options) : Node("go2_driver", o
   base_link_frame_ = declare_parameter<std::string>("base_link_frame", "base_link");
 
   body_z_offset_ = declare_parameter<double>("body_z_offset", 0.0);
-  use_msg_stamp_ = declare_parameter<bool>("use_msg_stamp", false);
+  use_msg_stamp_ = declare_parameter<bool>("use_msg_stamp", true);
   publish_tf_ = declare_parameter<bool>("publish_tf", true);
   publish_odom_ = declare_parameter<bool>("publish_odom", true);
 

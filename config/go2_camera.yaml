@@ -1,0 +1,26 @@
+# Nominal intrinsics of the Go2 built-in front camera at 1280x720, taken from
+# Unitree-Go2-Robot/go2_driver (refactoring-features branch). They were measured
+# on a different unit: good enough for viewing and rough geometry, not for
+# metric work. Calibrate this robot's camera and point camera_info_url at the
+# result (or call set_camera_info) when accuracy matters.
+image_width: 1280
+image_height: 720
+camera_name: go2_camera
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: [806.0577552762542, 0.0, 632.4742958402456, 0.0, 805.5558008931949, 346.8794920158575, 0.0, 0.0, 1.0]
+distortion_model: plumb_bob
+distortion_coefficients:
+  rows: 1
+  cols: 5
+  data: [-0.3899037066336244, 0.1788088900468458, 0.0002001278572207758, -0.000684749815310552, -0.044162166777284]
+rectification_matrix:
+  rows: 3
+  cols: 3
+  data: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+projection_matrix:
+  rows: 3
+  cols: 4
+  # yamllint disable-line rule:line-length
+  data: [806.0577552762542, 0.0, 632.4742958402456, 0.0, 0.0, 805.5558008931949, 346.8794920158575, 0.0, 0.0, 0.0, 1.0, 0.0]

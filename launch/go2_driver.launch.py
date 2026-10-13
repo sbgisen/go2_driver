@@ -17,6 +17,7 @@
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -67,6 +68,14 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument('publish_odom',
                               default_value='true',
                               description='Whether to republish the Unitree odometry.'))
+    args.append(
+        DeclareLaunchArgument('use_camera',
+                              default_value='true',
+                              description='Whether to start the front camera decoder.'))
+    args.append(
+        DeclareLaunchArgument('camera_resolution',
+                              default_value='720',
+                              description='Resolution tag of the /frontvideostream frames to decode.'))
 
     go2_driver = Node(package='go2_driver',
                       executable='go2_driver_node',
@@ -92,7 +101,17 @@ def generate_launch_description() -> LaunchDescription:
                             name='go2_sport_bridge',
                             output='screen')
 
+    go2_camera = Node(package='go2_driver',
+                      executable='go2_camera_node',
+                      name='go2_camera',
+                      output='screen',
+                      condition=IfCondition(LaunchConfiguration('use_camera')),
+                      parameters=[{
+                          'resolution': _param('camera_resolution', int),
+                      }])
+
     return LaunchDescription(args + [
         go2_driver,
         go2_sport_bridge,
+        go2_camera,
     ])

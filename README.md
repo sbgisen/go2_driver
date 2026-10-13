@@ -1,18 +1,21 @@
 # go2_driver
 
-ROS 2 driver for the Unitree Go2. It is a pair of bridges between the robot's
-firmware DDS interface and a standard ROS 2 / Nav2 stack:
+ROS 2 driver for the Unitree Go2. It bridges the robot's firmware DDS
+interface to a standard ROS 2 / Nav2 stack:
 
 | Component | Executable | Direction | Responsibility |
 |---|---|---|---|
 | `go2_driver::Go2Driver` | `go2_driver_node` | robot &rarr; ROS | Joint states, point cloud, dynamic TF, odometry |
 | `go2_driver::Go2SportBridge` | `go2_sport_bridge_node` | ROS &rarr; robot | `cmd_vel` and mode services translated to Sport API requests |
+| `go2_driver::Go2Camera` | `go2_camera_node` | robot &rarr; ROS | Front camera H.264 stream decoded to `sensor_msgs/Image` |
 
-Both are `rclcpp_components` plugins in a single shared library, so they can be
-composed into a container, and both also ship as standalone executables.
+All three are `rclcpp_components` plugins in a single shared library, so they
+can be composed into a container, and each also ships as a standalone
+executable.
 
 They are deliberately kept separate: the state bridge must keep publishing TF
-and odometry even when no one is allowed to command the robot.
+and odometry even when no one is allowed to command the robot, and a camera
+decode stall must not take the state bridge down with it.
 
 ## Prerequisites
 
@@ -33,7 +36,8 @@ ros2 launch go2_driver go2_driver.launch.py
 ```
 
 Every `go2_driver` parameter is exposed as a launch argument. The launch file
-starts both bridges.
+starts both bridges and the camera node; `use_camera:=false` leaves the camera
+out.
 
 Nothing else may own `api/sport/request` at the same time: two command bridges
 would both subscribe to `cmd_vel` and both push Sport API requests, and the
@@ -213,6 +217,53 @@ means the Sport API request was published, not that the robot accepted it.
 ```bash
 ros2 service call /switch_joystick go2_interfaces/srv/SwitchJoystick "{flag: true}"
 ```
+
+## `go2_camera` — front camera
+
+Decodes the H.264 stream the firmware publishes on `/frontvideostream`
+(`unitree_go/msg/Go2FrontVideoData`) and republishes it as plain images.
+Decoding goes through `ffmpeg_encoder_decoder` (libavcodec), so no FFmpeg
+development packages have to be installed by hand: `rosdep install` pulls in
+everything.
+
+### Interfaces
+
+| Kind | Name | Type | Notes |
+|---|---|---|---|
+| Subscriber | `/frontvideostream` | `unitree_go/msg/Go2FrontVideoData` | Renamed by `input_video_topic`, best-effort QoS |
+| Publisher | `go2_camera/image_raw` | `sensor_msgs/msg/Image` | `bgr8`; `image_transport` plugins add `compressed` etc. |
+| Publisher | `go2_camera/camera_info` | `sensor_msgs/msg/CameraInfo` | Loaded from `camera_info_url` |
+| Service | `set_camera_info` | `sensor_msgs/srv/SetCameraInfo` | Provided by `camera_info_manager` |
+
+### Parameters
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `input_video_topic` | string | `/frontvideostream` | Firmware video topic |
+| `resolution` | int | `720` | Only frames whose `resolution` field matches are decoded. The firmware was seen sending `360` and `720`; any other value decodes nothing and the node warns |
+| `frame_id` | string | `go2_camera_optical_frame` | `frame_id` of the image and camera info (defined in `go2_description`) |
+| `decoder` | string | `h264` | libavcodec decoder name, e.g. `h264_cuvid` for hardware decoding |
+| `camera_name` | string | `go2_camera` | Camera name handed to `camera_info_manager` |
+| `camera_info_url` | string | `package://go2_driver/config/go2_camera.yaml` | Calibration file URL (`file://` or `package://`) |
+
+The bundled `config/go2_camera.yaml` holds nominal 1280x720 intrinsics taken
+from the upstream driver, measured on a different Go2. They are fine for
+viewing and rough geometry; for metric work calibrate this camera (e.g. with
+`camera_calibration`) and point `camera_info_url` at the result, or let
+`set_camera_info` overwrite the bundled file.
+
+Decoding only runs while something subscribes to `go2_camera/image_raw` or one
+of its transports, and it always (re)starts at a keyframe, so the first image
+can lag a new subscriber by up to one GOP.
+
+Raw 1280x720 `bgr8` frames are 2.7 MB each. To watch the camera from another
+machine, pick the `compressed` transport in rviz's Image display instead of
+`raw`.
+
+Image stamps are the node clock at decode time; the firmware's `time_frame`
+field is not used.
+
+---
 
 ## Debugging
 

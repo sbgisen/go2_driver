@@ -240,7 +240,7 @@ everything.
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `input_video_topic` | string | `/frontvideostream` | Firmware video topic |
-| `resolution` | int | `720` | Only frames whose `resolution` field matches are decoded; the stream carries several |
+| `resolution` | int | `720` | Only frames whose `resolution` field matches are decoded. The firmware was seen sending `360` and `720`; any other value decodes nothing and the node warns |
 | `frame_id` | string | `go2_camera_optical_frame` | `frame_id` of the image and camera info (defined in `go2_description`) |
 | `decoder` | string | `h264` | libavcodec decoder name, e.g. `h264_cuvid` for hardware decoding |
 | `camera_name` | string | `go2_camera` | Camera name handed to `camera_info_manager` |

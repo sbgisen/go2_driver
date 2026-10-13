@@ -15,6 +15,7 @@
 #include <cstddef>
 #include <go2_driver/go2_camera.hpp>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -37,6 +38,22 @@ constexpr uint8_t g_NAL_NON_IDR_SLICE = 1;
 constexpr uint8_t g_NAL_IDR_SLICE = 5;
 constexpr uint8_t g_NAL_SPS = 7;
 constexpr uint8_t g_NAL_PPS = 8;
+
+// The firmware interleaves several resolutions on one topic, so give it this long to
+// deliver a matching frame before complaining that `resolution` matches nothing.
+constexpr double g_RESOLUTION_GRACE_SEC = 2.0;
+
+auto joinResolutions(const std::set<int> & resolutions) -> std::string
+{
+  std::string joined;
+  for (const int resolution : resolutions) {
+    if (!joined.empty()) {
+      joined += ", ";
+    }
+    joined += std::to_string(resolution);
+  }
+  return joined;
+}
 
 struct NalUnit
 {
@@ -123,9 +140,22 @@ auto Go2Camera::initDecoder() -> bool
 
 auto Go2Camera::videoCallback(unitree_go::msg::Go2FrontVideoData::SharedPtr msg) -> void
 {
-  if (decoder_failed_ || msg->resolution != resolution_) {
+  if (decoder_failed_) {
     return;
   }
+  if (first_frame_time_.nanoseconds() == 0) {
+    first_frame_time_ = now();
+  }
+  if (msg->resolution != resolution_) {
+    seen_resolutions_.insert(msg->resolution);
+    if (!resolution_matched_ && (now() - first_frame_time_).seconds() > g_RESOLUTION_GRACE_SEC) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 5000, "No frames with resolution %d; the stream carries %s", resolution_,
+        joinResolutions(seen_resolutions_).c_str());
+    }
+    return;
+  }
+  resolution_matched_ = true;
   if (camera_pub_.getNumSubscribers() == 0) {
     // Nobody is listening: skip the decode and resync on the next keyframe once someone connects.
     waiting_for_keyframe_ = true;

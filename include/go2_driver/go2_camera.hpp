@@ -22,6 +22,7 @@
 #include <memory>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
+#include <set>
 #include <string>
 #include <unitree_go/msg/go2_front_video_data.hpp>
 #include <vector>
@@ -56,6 +57,12 @@ private:
   bool waiting_for_keyframe_{true};
   bool decoder_failed_{false};
   uint64_t next_pts_{0};
+
+  // For the "nothing matches `resolution`" warning: what the stream actually carries,
+  // whether a matching frame was ever seen, and when the first frame arrived.
+  std::set<int> seen_resolutions_;
+  bool resolution_matched_{false};
+  rclcpp::Time first_frame_time_{0, 0, RCL_ROS_TIME};
 
   std::string input_video_topic_;
   std::string frame_id_;

@@ -85,6 +85,14 @@ def generate_launch_description() -> LaunchDescription:
                           'publish_odom': _param('publish_odom', bool),
                       }])
 
+    # A separate process from go2_driver on purpose: the state bridge must keep
+    # publishing TF and odometry even if the command bridge is not wanted.
+    go2_sport_bridge = Node(package='go2_driver',
+                            executable='go2_sport_bridge_node',
+                            name='go2_sport_bridge',
+                            output='screen')
+
     return LaunchDescription(args + [
         go2_driver,
+        go2_sport_bridge,
     ])

@@ -124,15 +124,23 @@ went out. A request the robot never answers fails once the timeout expires.
 |---|---|---|---|
 | `wait_for_response` | bool | `true` | Report the robot's status code instead of only that the request was published |
 | `response_timeout` | double | `2.0` | Seconds the robot is given to reply [s] |
+| `blocked_modes` | string[] | `[front_flip, back_flip, left_flip, hand_stand]` | `mode` presets refused without being sent; `[none]` blocks nothing (see [`mode`](#mode)) |
 
 Set `wait_for_response:=false` if a firmware version turns out not to answer a
 request you need; services then return `success: true` as soon as the request is
 published, and say "published" rather than "accepted" in `message`.
 `get_auto_recovery` cannot work in that mode, because its answer *is* the reply.
-The launch file declares it as an argument for this node only —
-`go2_robot_state_bridge` always waits, since each of its services is a query.
-`response_timeout` is not a launch argument, because the two bridges want
-different values; override it per node with `--ros-args -p` if you need to.
+
+All three parameters are launch arguments: `wait_for_response`, `blocked_modes`
+and `sport_response_timeout` (this node's `response_timeout`).
+`go2_robot_state_bridge` has no `wait_for_response` — it always waits, since
+each of its services is a query — and its `response_timeout` is the separate
+`robot_state_response_timeout` argument, because the two bridges want
+different values. `blocked_modes` takes a yaml list:
+
+```bash
+ros2 launch go2_driver go2_driver.launch.py blocked_modes:="[front_flip, back_flip]"
+```
 
 ### `cmd_vel`
 
@@ -142,10 +150,10 @@ different values; override it per node with `--ros-args -p` if you need to.
 |---|---|
 | `linear.x` | `x` |
 | `linear.y` | `y` |
-| `angular.z` | `yaw` |
+| `angular.z` | `z` (yaw rate) |
 
 The velocities are in the body frame, and the firmware clamps them to
-`x` [-2.5, 3.8] m/s, `y` [-1.0, 1.0] m/s, `yaw` [-4, 4] rad/s.
+`x` [-2.5, 3.8] m/s, `y` [-1.0, 1.0] m/s, `z` [-4, 4] rad/s.
 
 ```bash
 ros2 topic pub /cmd_vel geometry_msgs/msg/Twist \
@@ -211,10 +219,16 @@ Gaits:
 | `switch_avoid_mode` | Toggle the obstacle avoidance mode |
 | `auto_recovery_set` | Enable automatic recovery after a fall |
 
-Acrobatics — only on a clear, safe surface. `front_flip`, `back_flip`,
-`left_flip` and `hand_stand` are **refused**: they invert the robot and would
-destroy a payload, so `mode` answers `success: false` without sending anything.
-Publish the Sport API id on `api/sport/request` yourself if you really mean it.
+Acrobatics — only on a clear, safe surface. The presets listed in the
+`blocked_modes` parameter are **refused**: `mode` answers `success: false`
+without sending anything. By default those are `front_flip`, `back_flip`,
+`left_flip` and `hand_stand`, which put excessive stress on the robot and its
+payload. Shorten or extend the list per robot, or publish the Sport API id on
+`api/sport/request` yourself if you really mean it. To block nothing, pass
+`blocked_modes:="[none]"` — `none` is the documented stand-in for an empty
+list, which ROS 2 cannot express as a parameter value (`[]` makes the node
+exit while reading its parameters). Any other name that is no preset is warned
+about and ignored.
 
 | Preset | Description |
 |---|---|
@@ -300,7 +314,8 @@ risk is in calling them: `service_switch` can stop the robot's own services,
 | Service | `service_list` | `go2_interfaces/srv/ServiceList` | 1003 | List the services with their status and protect flags |
 
 Parameter `response_timeout` (double, default `5.0`) — more generous than the
-sport bridge's, since listing takes longer than acknowledging.
+sport bridge's, since listing takes longer than acknowledging. The launch file
+exposes it as `robot_state_response_timeout`.
 
 ```bash
 # what is running
@@ -315,6 +330,7 @@ ros2 service call /set_report_freq go2_interfaces/srv/SetReportFreq "{interval: 
 
 **`status` is 0 for running and 1 for stopped** — the opposite of what the
 numbers suggest. `enable: true` therefore drives `status` from 1 to 0.
+`service_list` reports -1 for an entry whose status the robot left out.
 
 `service_list` reports `name`, `status` and `protect` only. It carries no
 version field; the robot's own `/servicestate` topic does, and

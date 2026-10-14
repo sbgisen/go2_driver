@@ -15,16 +15,20 @@
 # Original work: Copyright (c) 2024 Intelligent Robotics Lab (URJC),
 # licensed under the BSD 3-Clause License. See the NOTICE file for its terms.
 
+from typing import List
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
+from launch.utilities.type_utils import AllowedTypesType
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
 
-def _param(name: str, value_type: type = str) -> ParameterValue:
+def _param(name: str, value_type: AllowedTypesType = str) -> ParameterValue:
     # value_type coerces the launch-argument string so the node's parameter type
-    # checks (declare_parameter<std::string> / <double> / <bool>) pass.
+    # checks (declare_parameter<std::string> / <double> / <bool> / <vector<string>>)
+    # pass. List arguments are written in yaml flow style: '[a, b]'.
     return ParameterValue(LaunchConfiguration(name), value_type=value_type)
 
 
@@ -72,6 +76,20 @@ def generate_launch_description() -> LaunchDescription:
             'wait_for_response',
             default_value='true',
             description="Sport bridge: report the robot's status code instead of only that the request was sent."))
+    args.append(
+        DeclareLaunchArgument(
+            'blocked_modes',
+            default_value='[front_flip, back_flip, left_flip, hand_stand]',
+            description='Sport bridge: mode presets refused without being sent, as a yaml list of names. '
+            '[none] blocks nothing.'))
+    args.append(
+        DeclareLaunchArgument('sport_response_timeout',
+                              default_value='2.0',
+                              description='Sport bridge: seconds the robot is given to reply to a request [s].'))
+    args.append(
+        DeclareLaunchArgument('robot_state_response_timeout',
+                              default_value='5.0',
+                              description='Robot state bridge: seconds the robot is given to reply to a request [s].'))
 
     go2_driver = Node(package='go2_driver',
                       executable='go2_driver_node',
@@ -92,16 +110,17 @@ def generate_launch_description() -> LaunchDescription:
 
     # A separate process from go2_driver on purpose: the state bridge must keep
     # publishing TF and odometry even if the command bridge is not wanted.
-    # response_timeout is deliberately not a launch argument: the two bridges
-    # have different defaults (listing services takes longer than acknowledging
-    # a command), so one shared value would be wrong for one of them. Override
-    # it per node with --ros-args -p if a slow link needs it.
+    # The two bridges' response_timeout parameters have different defaults
+    # (listing services takes longer than acknowledging a command), so each gets
+    # its own launch argument instead of one shared value.
     go2_sport_bridge = Node(package='go2_driver',
                             executable='go2_sport_bridge_node',
                             name='go2_sport_bridge',
                             output='screen',
                             parameters=[{
                                 'wait_for_response': _param('wait_for_response', bool),
+                                'blocked_modes': _param('blocked_modes', List[str]),
+                                'response_timeout': _param('sport_response_timeout', float),
                             }])
 
     # No wait_for_response here: Go2RobotStateBridge does not declare one. It
@@ -110,7 +129,10 @@ def generate_launch_description() -> LaunchDescription:
     go2_robot_state_bridge = Node(package='go2_driver',
                                   executable='go2_robot_state_bridge_node',
                                   name='go2_robot_state_bridge',
-                                  output='screen')
+                                  output='screen',
+                                  parameters=[{
+                                      'response_timeout': _param('robot_state_response_timeout', float),
+                                  }])
 
     return LaunchDescription(args + [
         go2_driver,

@@ -27,6 +27,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <rclcpp/rclcpp.hpp>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -106,6 +107,8 @@ private:
   std::optional<SequenceRun> active_sequence_;
 
   bool wait_for_response_{true};
+  // Presets answered with success: false without sending anything (blocked_modes parameter).
+  std::set<std::string> blocked_modes_;
 
   std::unordered_map<std::string, std::vector<SportCommandStep>> presets_;
 };

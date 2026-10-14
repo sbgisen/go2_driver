@@ -168,8 +168,9 @@ void Go2RobotStateBridge::handleServiceList(
             }
             go2_interfaces::msg::ServiceState state;
             state.name = entry.contains("name") && entry["name"].is_string() ? entry["name"].get<std::string>() : "";
+            // 0 would read as "running", so an entry without a status gets -1 instead.
             state.status =
-              entry.contains("status") && entry["status"].is_number_integer() ? entry["status"].get<int32_t>() : 0;
+              entry.contains("status") && entry["status"].is_number_integer() ? entry["status"].get<int32_t>() : -1;
             state.protect =
               entry.contains("protect") && entry["protect"].is_number_integer() ? entry["protect"].get<int32_t>() : 0;
             // ServiceList carries no version; the robot's /servicestate does.

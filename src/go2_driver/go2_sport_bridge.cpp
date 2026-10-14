@@ -14,7 +14,6 @@
 
 #include "go2_driver/go2_sport_bridge.hpp"
 
-#include <algorithm>
 #include <chrono>
 #include <functional>
 #include <set>
@@ -29,8 +28,14 @@ namespace go2_driver
 namespace
 {
 
-// Refused rather than sent: these invert the robot.
-const std::set<std::string> g_BLOCKED_MODES{"front_flip", "back_flip", "left_flip", "hand_stand"};
+// Refused by default: these put excessive stress on the robot and its payload.
+// Overridable per robot through the blocked_modes parameter.
+const std::vector<std::string> g_DEFAULT_BLOCKED_MODES{"front_flip", "back_flip", "left_flip", "hand_stand"};
+
+// blocked_modes entry meaning "block nothing". An empty list cannot be passed
+// in: rclcpp rejects `[]` while reading the parameter overrides, before the
+// node declares anything, so a named sentinel stands in for it.
+constexpr const char * g_BLOCK_NOTHING = "none";
 
 // The Sport API SpeedLevel command takes -1 or 1, not the whole [-1, 1] range:
 // the firmware answers 0 with status.code = -1 (measured on the robot, 6/6 on
@@ -69,15 +74,12 @@ auto dataJson(T value) -> nlohmann::json
   return js;
 }
 
-auto availableModes(const std::unordered_map<std::string, std::vector<SportCommandStep>> & presets) -> std::string
+// Comma-separated, in the set's (sorted) order. "(none)" for an empty set.
+auto joinNames(const std::set<std::string> & names) -> std::string
 {
-  std::vector<std::string> names;
-  names.reserve(presets.size());
-  for (const auto & entry : presets) {
-    names.push_back(entry.first);
+  if (names.empty()) {
+    return "(none)";
   }
-  std::sort(names.begin(), names.end());
-
   std::string joined;
   for (const auto & name : names) {
     if (!joined.empty()) {
@@ -86,6 +88,15 @@ auto availableModes(const std::unordered_map<std::string, std::vector<SportComma
     joined += name;
   }
   return joined;
+}
+
+auto availableModes(const std::unordered_map<std::string, std::vector<SportCommandStep>> & presets) -> std::string
+{
+  std::set<std::string> names;
+  for (const auto & entry : presets) {
+    names.insert(entry.first);
+  }
+  return joinNames(names);
 }
 
 // Both Move and Euler take their three values under x / y / z.
@@ -127,6 +138,18 @@ Go2SportBridge::Go2SportBridge(const rclcpp::NodeOptions & options) : Node("go2_
 
   wait_for_response_ = declare_parameter<bool>("wait_for_response", true);
   const auto timeout = declare_parameter<double>("response_timeout", g_DEFAULT_RESPONSE_TIMEOUT);
+
+  const auto blocked = declare_parameter<std::vector<std::string>>("blocked_modes", g_DEFAULT_BLOCKED_MODES);
+  for (const auto & name : blocked) {
+    if (name != g_BLOCK_NOTHING) {
+      blocked_modes_.insert(name);
+    }
+  }
+  for (const auto & name : blocked_modes_) {
+    if (presets_.find(name) == presets_.end()) {
+      RCLCPP_WARN(get_logger(), "blocked_modes lists '%s', which is not a mode preset", name.c_str());
+    }
+  }
 
   api_client_ = std::make_unique<UnitreeApiClient>(
     this, "api/sport/request", "api/sport/response", std::chrono::milliseconds(static_cast<int64_t>(timeout * 1000.0)));
@@ -178,6 +201,7 @@ Go2SportBridge::Go2SportBridge(const rclcpp::NodeOptions & options) : Node("go2_
     get_logger(), "wait_for_response: %s",
     wait_for_response_ ? "true (services report the status code the robot replied with)"
                        : "false (services report only that the request was published)");
+  RCLCPP_INFO(get_logger(), "blocked_modes: %s", joinNames(blocked_modes_).c_str());
 }
 
 void Go2SportBridge::initPresets()
@@ -339,9 +363,9 @@ void Go2SportBridge::handleMode(
     return;
   }
 
-  if (g_BLOCKED_MODES.count(request->mode) != 0) {
+  if (blocked_modes_.count(request->mode) != 0) {
     response.message = request->mode +
-                       " is disabled: it inverts the robot and would destroy a payload. "
+                       " is listed in the blocked_modes parameter and was not sent. "
                        "Send the Sport API id directly on api/sport/request if you really mean it.";
     mode_service_->send_response(*header, response);
     return;

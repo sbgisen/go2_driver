@@ -8,6 +8,8 @@
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <!-- ffmpeg_encoder_decoder resolves libav through pkg-config in its exported CMake config. -->
+  <buildtool_depend>pkg-config</buildtool_depend>
 
   <depend>rclcpp</depend>
   <depend>rclcpp_components</depend>
@@ -22,6 +24,9 @@
   <depend>tf2</depend>
   <depend>tf2_ros</depend>
   <depend>tf2_geometry_msgs</depend>
+  <depend>ffmpeg_encoder_decoder</depend>
+  <depend>image_transport</depend>
+  <depend>camera_info_manager</depend>
 
   <export>
     <build_type>ament_cmake</build_type>

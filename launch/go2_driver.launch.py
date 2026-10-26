@@ -19,6 +19,7 @@ from typing import List
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch.utilities.type_utils import AllowedTypesType
 from launch_ros.actions import Node
@@ -90,6 +91,14 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument('robot_state_response_timeout',
                               default_value='5.0',
                               description='Robot state bridge: seconds the robot is given to reply to a request [s].'))
+    args.append(
+        DeclareLaunchArgument('use_camera',
+                              default_value='false',
+                              description='Whether to start the front camera decoder.'))
+    args.append(
+        DeclareLaunchArgument('camera_resolution',
+                              default_value='720',
+                              description='Resolution tag of the /frontvideostream frames to decode.'))
 
     go2_driver = Node(package='go2_driver',
                       executable='go2_driver_node',
@@ -134,8 +143,18 @@ def generate_launch_description() -> LaunchDescription:
                                       'response_timeout': _param('robot_state_response_timeout', float),
                                   }])
 
+    go2_camera = Node(package='go2_driver',
+                      executable='go2_camera_node',
+                      name='go2_camera',
+                      output='screen',
+                      condition=IfCondition(LaunchConfiguration('use_camera')),
+                      parameters=[{
+                          'resolution': _param('camera_resolution', int),
+                      }])
+
     return LaunchDescription(args + [
         go2_driver,
         go2_sport_bridge,
         go2_robot_state_bridge,
+        go2_camera,
     ])

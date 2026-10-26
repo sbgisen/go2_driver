@@ -29,6 +29,9 @@ find_package(nlohmann_json REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
+find_package(ffmpeg_encoder_decoder REQUIRED)
+find_package(image_transport REQUIRED)
+find_package(camera_info_manager REQUIRED)
 
 set(
   dependencies
@@ -44,6 +47,9 @@ set(
   tf2
   tf2_ros
   tf2_geometry_msgs
+  ffmpeg_encoder_decoder
+  image_transport
+  camera_info_manager
 )
 
 include_directories(include)
@@ -54,6 +60,7 @@ add_library(
   src/go2_driver/go2_robot_state_bridge.cpp
   src/go2_driver/go2_sport_bridge.cpp
   src/go2_driver/unitree_api_client.cpp
+  src/go2_driver/go2_camera.cpp
 )
 
 ament_target_dependencies(${PROJECT_NAME} ${dependencies})
@@ -83,6 +90,14 @@ rclcpp_components_register_node(
   go2_robot_state_bridge_node
 )
 
+rclcpp_components_register_node(
+  ${PROJECT_NAME}
+  PLUGIN
+  "go2_driver::Go2Camera"
+  EXECUTABLE
+  go2_camera_node
+)
+
 install(
   TARGETS ${PROJECT_NAME}
   ARCHIVE DESTINATION lib
@@ -96,7 +111,7 @@ install(
 )
 
 install(
-  DIRECTORY launch
+  DIRECTORY launch config
   DESTINATION share/${PROJECT_NAME}
 )
 

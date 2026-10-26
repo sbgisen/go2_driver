@@ -39,7 +39,7 @@ ros2 launch go2_driver go2_driver.launch.py
 ```
 
 Every `go2_driver` parameter is exposed as a launch argument. The launch file
-starts all four nodes; `use_camera:=false` leaves the camera out.
+starts the three bridge nodes; `use_camera:=true` adds the camera.
 
 Nothing else may own `api/sport/request` at the same time: two command bridges
 would both subscribe to `cmd_vel` and both push Sport API requests, and the

@@ -93,7 +93,7 @@ def generate_launch_description() -> LaunchDescription:
                               description='Robot state bridge: seconds the robot is given to reply to a request [s].'))
     args.append(
         DeclareLaunchArgument('use_camera',
-                              default_value='true',
+                              default_value='false',
                               description='Whether to start the front camera decoder.'))
     args.append(
         DeclareLaunchArgument('camera_resolution',
